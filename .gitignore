@@ -43,6 +43,9 @@ desktop.ini
 *.db-shm
 *.db-wal
 
+# Claude Code instructions (local only)
+CLAUDE.md
+
 # Secrets & API keys (KHÔNG bao giờ commit)
 appsettings.local.json
 *.env
