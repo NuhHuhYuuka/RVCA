@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Client_UI_App</RootNamespace>
+    <AssemblyName>Client_UI_App</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Tham chiếu tới SecurityData_Module (AES-GCM, ECDH, SQLite, FileTransfer) -->
+    <ProjectReference Include="..\..\SecurityData_Module\SecurityData_Module.csproj" />
+  </ItemGroup>
+
+</Project>

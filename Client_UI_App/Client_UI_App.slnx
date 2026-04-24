@@ -1,0 +1,6 @@
+<Solution>
+  <!-- UI Client chính -->
+  <Project Path="Client_UI_App/Client_UI_App.csproj" />
+  <!-- Shared library: mã hóa AES-GCM, ECDH, SQLite, FileTransfer -->
+  <Project Path="../SecurityData_Module/SecurityData_Module.csproj" />
+</Solution>

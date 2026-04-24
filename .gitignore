@@ -1,0 +1,53 @@
+# Build output
+bin/
+obj/
+out/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.rsuser
+
+# NuGet
+packages/
+*.nupkg
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# .NET
+*.dll
+*.exe
+!**/*.exe.config
+*.pdb
+*.cache
+*.ilk
+*.meta
+*.ncrunch*
+*.pidb
+
+# Rider / JetBrains
+.idea/
+*.sln.iml
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# App data / runtime
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets & API keys (KHÔNG bao giờ commit)
+appsettings.local.json
+*.env
+.env
+
+# VoiceVox / audio temp
+*.wav
+*.mp3

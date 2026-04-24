@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Suppress AesGcm(byte[]) deprecation warning in .NET 8+ -->
+    <NoWarn>SYSLIB0053</NoWarn>
+  </PropertyGroup>
+
+  <!-- System.Data.SQLite dùng bởi DatabaseService.cs -->
+  <ItemGroup>
+    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.119" />
+  </ItemGroup>
+
+</Project>
