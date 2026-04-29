@@ -109,6 +109,22 @@ namespace Client_UI_App.Services
             await Task.Delay(200); // Đảm bảo tất cả packet bay đi
         }
 
+        // ── Gửi 1 dòng TCP cho voice signaling (VOICE_OFFER/ANSWER/REJECT/HANGUP) ──
+        public static async Task SendVoiceSignalAsync(string ip, int port, string line)
+        {
+            try
+            {
+                using TcpClient client = new();
+                client.SendTimeout = 5_000;
+                await client.ConnectAsync(ip, port);
+                await using NetworkStream stream = client.GetStream();
+                await using StreamWriter  writer = new(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+                await writer.WriteLineAsync(line);
+                await Task.Delay(100);
+            }
+            catch { /* Peer offline hoặc từ chối kết nối */ }
+        }
+
         // ── Gửi tin nhắn đến Bot UitiChan (queue nếu nhiều client cùng nhắn) ──
         public static async Task<(string textResponse, byte[] audioData)> SendMessageAsync(
             string peerIp,
