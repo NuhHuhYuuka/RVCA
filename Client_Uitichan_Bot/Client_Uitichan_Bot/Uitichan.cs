@@ -296,14 +296,24 @@ static async Task HandlePeerConnectionAsync(TcpClient client, string secretKey)
 
 static async Task TryInitWhisperAsync()
 {
+    // Ưu tiên Groq cloud STT — không cần tải model, nhanh hơn nhiều
+    if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GROQ_API_KEY")))
+    {
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine("[STT] GROQ_API_KEY tìm thấy — dùng Groq Whisper cloud (bỏ qua local model).");
+        Console.ResetColor();
+        return;
+    }
+
+    // Fallback: local Whisper nếu không có Groq key
     if (!File.Exists(BotGlobals.WhisperModelPath))
     {
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine($"[WHISPER] Không tìm thấy model, đang tải ggml-base.bin (~142MB)...");
+        Console.WriteLine($"[WHISPER] Không tìm thấy model, đang tải ggml-small.bin (~466MB)...");
         Console.ResetColor();
         try
         {
-            const string modelUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin";
+            const string modelUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin";
             using var http        = new HttpClient();
             http.Timeout          = TimeSpan.FromMinutes(10);
             using var modelStream = await http.GetStreamAsync(modelUrl);
@@ -317,7 +327,6 @@ static async Task TryInitWhisperAsync()
         {
             Console.ForegroundColor = ConsoleColor.Red;
             Console.WriteLine($"[WHISPER] Tải model thất bại: {dlEx.Message}");
-            Console.WriteLine("[WHISPER] STT bị vô hiệu. Tải thủ công: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin");
             Console.ResetColor();
             return;
         }
@@ -329,7 +338,7 @@ static async Task TryInitWhisperAsync()
             .WithLanguage("vi")
             .Build();
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine("[WHISPER] STT khởi tạo thành công.");
+        Console.WriteLine("[WHISPER] Local STT khởi tạo thành công (fallback).");
         Console.ResetColor();
     }
     catch (Exception ex)
@@ -342,21 +351,121 @@ static async Task TryInitWhisperAsync()
 
 static async Task<string> TranscribeAsync(short[] pcm48k)
 {
-    if (BotGlobals.WhisperProcessor == null || pcm48k.Length == 0) return string.Empty;
+    if (pcm48k.Length == 0) return string.Empty;
+
+    string groqKey = Environment.GetEnvironmentVariable("GROQ_API_KEY") ?? string.Empty;
+    if (!string.IsNullOrEmpty(groqKey))
+        return await TranscribeGroqAsync(pcm48k, groqKey);
+
+    // Fallback: local Whisper
+    if (BotGlobals.WhisperProcessor == null) return string.Empty;
     try
     {
-        // Whisper cần 16kHz mono float[] — downsample 48k→16k (lấy 1 mẫu trong 3)
         int outLen = pcm48k.Length / 3;
         float[] floatAudio = new float[outLen];
         for (int i = 0; i < outLen; i++)
-            floatAudio[i] = pcm48k[i * 3] / (float)short.MaxValue;
-
+        {
+            int idx = i * 3;
+            int s0 = pcm48k[idx];
+            int s1 = idx + 1 < pcm48k.Length ? pcm48k[idx + 1] : 0;
+            int s2 = idx + 2 < pcm48k.Length ? pcm48k[idx + 2] : 0;
+            floatAudio[i] = (s0 + s1 + s2) / 3f / short.MaxValue;
+        }
         var sb = new StringBuilder();
         await foreach (var seg in BotGlobals.WhisperProcessor.ProcessAsync(floatAudio))
             sb.Append(seg.Text);
         return sb.ToString().Trim();
     }
     catch { return string.Empty; }
+}
+
+// Downsample 48kHz → 16kHz rồi đóng gói WAV, gửi lên Groq API
+static async Task<string> TranscribeGroqAsync(short[] pcm48k, string groqKey)
+{
+    try
+    {
+        // Downsample 48k→16k bằng averaging để giảm kích thước file upload
+        int outLen = pcm48k.Length / 3;
+        short[] pcm16k = new short[outLen];
+        for (int i = 0; i < outLen; i++)
+        {
+            int idx = i * 3;
+            int s0  = pcm48k[idx];
+            int s1  = idx + 1 < pcm48k.Length ? pcm48k[idx + 1] : 0;
+            int s2  = idx + 2 < pcm48k.Length ? pcm48k[idx + 2] : 0;
+            pcm16k[i] = (short)((s0 + s1 + s2) / 3);
+        }
+
+        byte[] wavBytes = BuildWav(pcm16k, 16000);
+
+        using var http = new HttpClient();
+        http.DefaultRequestHeaders.Add("Authorization", $"Bearer {groqKey}");
+
+        using var form    = new MultipartFormDataContent();
+        var audioContent  = new ByteArrayContent(wavBytes);
+        audioContent.Headers.ContentType =
+            new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
+        form.Add(audioContent,                                "file",            "audio.wav");
+        form.Add(new StringContent("whisper-large-v3-turbo"), "model");
+        form.Add(new StringContent("vi"),                     "language");
+        form.Add(new StringContent("verbose_json"),           "response_format");
+
+        var resp = await http.PostAsync(
+            "https://api.groq.com/openai/v1/audio/transcriptions", form);
+        resp.EnsureSuccessStatusCode();
+
+        // Lọc hallucination: kiểm tra no_speech_prob của segment đầu tiên
+        string json = await resp.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        if (root.TryGetProperty("segments", out var segs) && segs.GetArrayLength() > 0)
+        {
+            var firstSeg = segs[0];
+            if (firstSeg.TryGetProperty("no_speech_prob", out var nsp) &&
+                nsp.GetDouble() > 0.5)
+            {
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.WriteLine($"[STT] Bỏ qua — no_speech_prob={nsp.GetDouble():F2} (hallucination)");
+                Console.ResetColor();
+                return string.Empty;
+            }
+        }
+
+        return root.TryGetProperty("text", out var textProp)
+            ? textProp.GetString()?.Trim() ?? string.Empty
+            : string.Empty;
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"[GROQ STT] Lỗi: {ex.Message}");
+        Console.ResetColor();
+        return string.Empty;
+    }
+}
+
+// Đóng gói short[] PCM thành WAV bytes trong memory
+static byte[] BuildWav(short[] pcm, int sampleRate)
+{
+    int dataBytes = pcm.Length * 2;
+    using var ms = new MemoryStream(44 + dataBytes);
+    using var bw = new BinaryWriter(ms);
+    bw.Write(new[] { 'R','I','F','F' });
+    bw.Write(36 + dataBytes);
+    bw.Write(new[] { 'W','A','V','E' });
+    bw.Write(new[] { 'f','m','t',' ' });
+    bw.Write(16);
+    bw.Write((short)1);           // PCM
+    bw.Write((short)1);           // mono
+    bw.Write(sampleRate);
+    bw.Write(sampleRate * 2);     // byte rate
+    bw.Write((short)2);           // block align
+    bw.Write((short)16);          // bits per sample
+    bw.Write(new[] { 'd','a','t','a' });
+    bw.Write(dataBytes);
+    foreach (short s in pcm) bw.Write(s);
+    return ms.ToArray();
 }
 
 // Đọc WAV bytes từ VoiceVox → short[] PCM đã resample lên 48kHz cho Opus
@@ -429,8 +538,8 @@ static async Task HandleVoiceCallAsync(
     var    pcmBuf       = new List<short>();
     var    cts          = new CancellationTokenSource();
     int    silenceFrames = 0;
-    const int MaxSilenceFrames = 75;   // 75×20ms = 1500ms silence → process
-    const float RmsThreshold  = 0.008f;
+    const int MaxSilenceFrames = 30;   // 30×25ms = 750ms silence → process
+    const float RmsThreshold  = 0.012f;
 
     // Background: đọc VOICE_HANGUP từ TCP
     _ = Task.Run(async () =>
@@ -450,23 +559,67 @@ static async Task HandleVoiceCallAsync(
     Console.WriteLine($"[VOICE] Bot UDP:{botUdpPort} — đang lắng nghe giọng nói...");
     Console.ResetColor();
 
-    // Vòng lặp nhận Opus, tích lũy PCM, phát hiện khoảng lặng
+    // Vòng lặp nhận Opus — chỉ một ReceiveAsync pending tại một thời điểm
+    // Bug cũ: tạo recvTask mới mỗi iteration trong khi task cũ vẫn pending → exception → call tự ngắt
+    var recvTask = udpRecv.ReceiveAsync(cts.Token).AsTask();
     while (!cts.Token.IsCancellationRequested)
     {
         try
         {
-            UdpReceiveResult? recvResult = null;
-            try
-            {
-                var recvTask = udpRecv.ReceiveAsync(cts.Token).AsTask();
-                if (await Task.WhenAny(recvTask, Task.Delay(25, cts.Token)) == recvTask)
-                    recvResult = await recvTask;
-            }
-            catch (OperationCanceledException) { break; }
+            bool gotPacket = await Task.WhenAny(recvTask, Task.Delay(25, cts.Token)) == recvTask;
 
-            if (recvResult == null)
+            if (gotPacket)
             {
-                // Không có audio frame → tích lũy khoảng lặng
+                UdpReceiveResult recvResult;
+                try { recvResult = await recvTask; }
+                catch (OperationCanceledException) { break; }
+                catch { break; }
+                // Bắt đầu nhận packet tiếp theo ngay lập tức
+                recvTask = udpRecv.ReceiveAsync(cts.Token).AsTask();
+
+                byte[] data = recvResult.Buffer;
+                if (data.Length <= 2) continue;
+
+                short[] pcmFrame = new short[960];
+                int decoded;
+#pragma warning disable CS0618
+                try { decoded = decoder.Decode(data, 2, data.Length - 2, pcmFrame, 0, 960, false); }
+                catch { continue; }
+#pragma warning restore CS0618
+                if (decoded <= 0) continue;
+
+                double sum = 0;
+                for (int i = 0; i < decoded; i++) sum += (double)pcmFrame[i] * pcmFrame[i];
+                float rms = (float)Math.Sqrt(sum / decoded) / short.MaxValue;
+
+                if (rms < RmsThreshold)
+                {
+                    silenceFrames++;
+                    if (silenceFrames >= MaxSilenceFrames && pcmBuf.Count > 0)
+                    {
+                        await ProcessVoiceTurnAsync(
+                            pcmBuf.ToArray(), tcpWriter, udpSend, clientEp, encoder);
+                        pcmBuf.Clear();
+                        silenceFrames = 0;
+                    }
+                }
+                else
+                {
+                    silenceFrames = 0;
+                    pcmBuf.AddRange(pcmFrame[..decoded]);
+                    if (pcmBuf.Count >= 48000 * 10)
+                    {
+                        await ProcessVoiceTurnAsync(
+                            pcmBuf.ToArray(), tcpWriter, udpSend, clientEp, encoder);
+                        pcmBuf.Clear();
+                        silenceFrames = 0;
+                    }
+                }
+            }
+            else
+            {
+                // Timeout 25ms — không nhận được packet
+                if (cts.Token.IsCancellationRequested) break;
                 if (pcmBuf.Count > 0)
                 {
                     silenceFrames++;
@@ -477,48 +630,6 @@ static async Task HandleVoiceCallAsync(
                         pcmBuf.Clear();
                         silenceFrames = 0;
                     }
-                }
-                continue;
-            }
-
-            byte[] data = recvResult.Value.Buffer;
-            if (data.Length <= 2) continue;
-
-            short[] pcmFrame = new short[960];
-            int decoded;
-#pragma warning disable CS0618
-            try { decoded = decoder.Decode(data, 2, data.Length - 2, pcmFrame, 0, 960, false); }
-            catch { continue; }
-#pragma warning restore CS0618
-            if (decoded <= 0) continue;
-
-            // Tính RMS để phát hiện khoảng lặng
-            double sum = 0;
-            for (int i = 0; i < decoded; i++) sum += (double)pcmFrame[i] * pcmFrame[i];
-            float rms = (float)Math.Sqrt(sum / decoded) / short.MaxValue;
-
-            if (rms < RmsThreshold)
-            {
-                silenceFrames++;
-                if (silenceFrames >= MaxSilenceFrames && pcmBuf.Count > 0)
-                {
-                    await ProcessVoiceTurnAsync(
-                        pcmBuf.ToArray(), tcpWriter, udpSend, clientEp, encoder);
-                    pcmBuf.Clear();
-                    silenceFrames = 0;
-                }
-            }
-            else
-            {
-                silenceFrames = 0;
-                pcmBuf.AddRange(pcmFrame[..decoded]);
-                // Max 10 giây mỗi lượt
-                if (pcmBuf.Count >= 48000 * 10)
-                {
-                    await ProcessVoiceTurnAsync(
-                        pcmBuf.ToArray(), tcpWriter, udpSend, clientEp, encoder);
-                    pcmBuf.Clear();
-                    silenceFrames = 0;
                 }
             }
         }
@@ -540,37 +651,52 @@ static async Task ProcessVoiceTurnAsync(
 {
     try
     {
-        // STT
+        // Kiểm tra năng lượng audio — bỏ qua nếu quá yếu (tránh hallucination)
+        double sumSq = 0;
+        for (int i = 0; i < pcmData.Length; i++) sumSq += (double)pcmData[i] * pcmData[i];
+        float bufRms = (float)Math.Sqrt(sumSq / pcmData.Length) / short.MaxValue;
+        if (bufRms < 0.008f)
+        {
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine($"[STT] Bỏ qua — audio quá yếu (RMS={bufRms:F4})");
+            Console.ResetColor();
+            return;
+        }
+
         string userText = await TranscribeAsync(pcmData);
-        if (!string.IsNullOrWhiteSpace(userText))
+
+        string aiPrompt;
+        if (string.IsNullOrWhiteSpace(userText))
+        {
+            aiPrompt = "Onii-chan gọi nhưng em không nghe thấy gì, hỏi thăm Onii-chan";
+        }
+        else
         {
             await tcpWriter.WriteLineAsync($"VOICE_CAPTION_USER|{userText}");
             Console.ForegroundColor = ConsoleColor.Gray;
             Console.WriteLine($"[STT] User: {userText}");
             Console.ResetColor();
+            aiPrompt = userText;
         }
 
-        string aiPrompt = string.IsNullOrWhiteSpace(userText)
-            ? "Onii-chan gọi nhưng em không nghe thấy gì, hỏi thăm Onii-chan"
-            : userText;
-
-        // AI
+        // AI và VoiceVox chạy song song: gọi AI → ngay khi có text → gọi TTS đồng thời gửi caption
         string aiRaw = await AskOpenRouterAsync(aiPrompt);
         var (vnText, jpText) = ParseBilingualResponse(aiRaw);
 
-        // Gửi caption text qua TCP ngay
-        await tcpWriter.WriteLineAsync($"VOICE_CAPTION|{vnText}");
+        // Gửi caption và gọi TTS song song
+        var captionTask = tcpWriter.WriteLineAsync($"VOICE_CAPTION|{vnText}");
+        var ttsTask     = string.IsNullOrWhiteSpace(jpText)
+            ? Task.FromResult(Array.Empty<byte>())
+            : GetVoiceVoxAudioAsync(jpText);
 
+        await captionTask;
         Console.ForegroundColor = ConsoleColor.Magenta;
         Console.WriteLine($"[VOICE OUT] {vnText}");
         Console.ResetColor();
 
-        // VoiceVox TTS → Opus → UDP
-        if (!string.IsNullOrWhiteSpace(jpText))
-        {
-            byte[] wavBytes = await GetVoiceVoxAudioAsync(jpText);
+        byte[] wavBytes = await ttsTask;
+        if (wavBytes.Length > 0)
             await SendWavAsOpusUdpAsync(wavBytes, udpSend, clientEp, encoder);
-        }
     }
     catch (Exception ex)
     {
@@ -590,6 +716,10 @@ static async Task SendWavAsOpusUdpAsync(
     const int FrameSamples = 960; // 20ms @ 48kHz
     ushort seq  = 0;
     byte[] opusBuf = new byte[1275];
+
+    // Stopwatch pacing — Task.Delay không đủ chính xác trên Windows (~15ms resolution)
+    var sw = Stopwatch.StartNew();
+    long nextFrameMs = 0;
 
     for (int i = 0; i + FrameSamples <= pcm.Length; i += FrameSamples)
     {
@@ -612,7 +742,9 @@ static async Task SendWavAsOpusUdpAsync(
         try { udpSend.Send(packet, packet.Length, clientEp); }
         catch { }
 
-        await Task.Delay(18); // pacing ~20ms
+        nextFrameMs += 20;
+        long toWait = nextFrameMs - sw.ElapsedMilliseconds;
+        if (toWait > 1) await Task.Delay((int)toWait);
     }
 }
 
@@ -786,5 +918,5 @@ static class BotGlobals
     public static WhisperFactory?    WhisperFactory   = null;
     public static WhisperProcessor?  WhisperProcessor = null;
     public static readonly string    WhisperModelPath =
-        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ggml-base.bin");
+        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ggml-small.bin");
 }

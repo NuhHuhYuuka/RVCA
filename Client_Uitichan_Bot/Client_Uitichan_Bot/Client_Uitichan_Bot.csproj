@@ -9,6 +9,12 @@
 
   <ItemGroup>
     <PackageReference Include="System.Windows.Extensions" Version="10.0.5" />
+    <!-- NAudio + Concentus: Opus encode/decode cho voice call -->
+    <PackageReference Include="NAudio"      Version="2.3.0" />
+    <PackageReference Include="Concentus"   Version="2.2.2" />
+    <!-- Whisper.net: STT tiếng Việt local (cần file ggml-base.bin) -->
+    <PackageReference Include="Whisper.net"         Version="1.7.4" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.7.4" />
   </ItemGroup>
 
 </Project>
