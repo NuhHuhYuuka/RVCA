@@ -15,11 +15,26 @@ namespace Client_UI_App.Forms
         private void InitializeComponent()
         {
             // ── Khai báo controls ──────────────────────────────────────
-            pnlLeft          = new Panel();
-            lblOnlineTitle   = new Label();
-            listBoxUsers     = new ListBox();
-            btnRefreshUsers  = new Button();
-            lblPeerInfo      = new Label();
+            pnlLeft         = new Panel();
+            lblOnlineTitle  = new Label();
+            listBoxUsers    = new ListBox();
+            btnRefreshUsers = new Button();
+            pnlGroupButtons = new Panel();
+            btnCreateGroup  = new Button();
+            btnJoinGroup    = new Button();
+            lblGroupsTitle  = new Label();
+            listBoxGroups   = new ListBox();
+
+            // Peer info area
+            pnlPeerInfo     = new Panel();
+            picPeerAvatar   = new PictureBox();
+            lblPeerInfo     = new Label();
+            btnCall         = new Button();
+
+            // User profile bar (bottom of sidebar)
+            pnlUserProfile  = new Panel();
+            picMyAvatar     = new PictureBox();
+            lblMyUsername   = new Label();
 
             pnlRight       = new Panel();
             rtbChat        = new RichTextBox();
@@ -32,107 +47,232 @@ namespace Client_UI_App.Forms
             lblStatus      = new Label();
 
             pnlLeft.SuspendLayout();
+            pnlGroupButtons.SuspendLayout();
+            pnlPeerInfo.SuspendLayout();
+            pnlUserProfile.SuspendLayout();
             pnlRight.SuspendLayout();
             pnlBottom.SuspendLayout();
             pnlStatus.SuspendLayout();
             this.SuspendLayout();
 
             // ── Bảng màu Dark Theme ────────────────────────────────────
-            var clrBgDeep    = Color.FromArgb(18,  18,  24);   // nền form
-            var clrBgLeft    = Color.FromArgb(24,  24,  34);   // panel trái
-            var clrBgRight   = Color.FromArgb(20,  20,  30);   // vùng chat
-            var clrBgInput   = Color.FromArgb(38,  38,  52);   // ô nhập liệu
-            var clrBgBottom  = Color.FromArgb(26,  26,  36);   // bottom bar
-            var clrBgStatus  = Color.FromArgb(16,  16,  22);   // status bar
-            var clrBgList    = Color.FromArgb(30,  30,  42);   // listbox
-            var clrTextMain  = Color.FromArgb(220, 220, 230);  // chữ chính
-            var clrTextHint  = Color.FromArgb(130, 130, 155);  // label gợi ý
-            var clrTextStatus= Color.FromArgb(160, 160, 180);  // status text
-            var clrAccBlue   = Color.FromArgb(0,   120, 212);  // nút Gửi / Đăng nhập
-            var clrAccGreen  = Color.FromArgb(0,   160, 110);  // nút Kết nối P2P
-            var clrAccPink   = Color.FromArgb(200,  50, 110);  // tiêu đề
+            var clrBgDeep      = Color.FromArgb(18,  18,  24);
+            var clrBgLeft      = Color.FromArgb(24,  24,  34);
+            var clrBgRight     = Color.FromArgb(20,  20,  30);
+            var clrBgInput     = Color.FromArgb(38,  38,  52);
+            var clrBgBottom    = Color.FromArgb(26,  26,  36);
+            var clrBgStatus    = Color.FromArgb(16,  16,  22);
+            var clrBgList      = Color.FromArgb(30,  30,  42);
+            var clrUserProfile = Color.FromArgb(20,  20,  30);
+            var clrTextMain    = Color.FromArgb(220, 220, 230);
+            var clrTextHint    = Color.FromArgb(130, 130, 155);
+            var clrTextStatus  = Color.FromArgb(160, 160, 180);
+            var clrAccBlue     = Color.FromArgb(0,   120, 212);
+            var clrAccGreen    = Color.FromArgb(0,   160, 110);
+            var clrAccPink     = Color.FromArgb(200,  50, 110);
 
             // ════════════════════════════════════════════════════════════
-            //  Panel trái – Danh sách online & thiết lập P2P
+            //  Panel trái — Danh sách online + Nhóm + Peer info + User profile
             // ════════════════════════════════════════════════════════════
             pnlLeft.BackColor = clrBgLeft;
             pnlLeft.Dock      = DockStyle.Left;
             pnlLeft.Width     = 240;
-            pnlLeft.Padding   = new Padding(8);
+            pnlLeft.Padding   = new Padding(0);
 
-            lblOnlineTitle.Text      = "Người dùng Online";
-            lblOnlineTitle.Font      = new Font("Segoe UI", 9F, FontStyle.Bold);
+            // ── Tiêu đề "Người dùng Online" ───────────────────────────
+            lblOnlineTitle.Text      = "  Người dùng Online";
+            lblOnlineTitle.Font      = new Font("Segoe UI", 8.5F, FontStyle.Bold);
             lblOnlineTitle.ForeColor = clrAccPink;
             lblOnlineTitle.BackColor = clrBgLeft;
             lblOnlineTitle.Dock      = DockStyle.Top;
             lblOnlineTitle.Height    = 24;
             lblOnlineTitle.TextAlign = ContentAlignment.MiddleLeft;
-            lblOnlineTitle.Padding   = new Padding(2, 0, 0, 0);
 
             listBoxUsers.Dock                  = DockStyle.Top;
-            listBoxUsers.Height                = 190;
-            listBoxUsers.Font                  = new Font("Segoe UI", 10F);
+            listBoxUsers.Height                = 110;
+            listBoxUsers.Font                  = new Font("Segoe UI", 9.5F);
             listBoxUsers.BorderStyle           = BorderStyle.None;
             listBoxUsers.SelectionMode         = SelectionMode.One;
             listBoxUsers.BackColor             = clrBgList;
             listBoxUsers.ForeColor             = clrTextMain;
+            listBoxUsers.Padding               = new Padding(4, 0, 0, 0);
             listBoxUsers.SelectedIndexChanged += listBoxUsers_SelectedIndexChanged;
 
-            btnRefreshUsers.Text      = "⟳ Làm mới danh sách";
+            btnRefreshUsers.Text      = "⟳  Làm mới";
             btnRefreshUsers.Font      = new Font("Segoe UI", 8.5F);
             btnRefreshUsers.Dock      = DockStyle.Top;
-            btnRefreshUsers.Height    = 28;
+            btnRefreshUsers.Height    = 26;
             btnRefreshUsers.BackColor = Color.FromArgb(40, 40, 58);
             btnRefreshUsers.ForeColor = Color.FromArgb(130, 180, 230);
             btnRefreshUsers.FlatStyle = FlatStyle.Flat;
-            btnRefreshUsers.FlatAppearance.BorderColor     = Color.FromArgb(60, 60, 80);
-            btnRefreshUsers.FlatAppearance.BorderSize      = 1;
+            btnRefreshUsers.FlatAppearance.BorderColor        = Color.FromArgb(60, 60, 80);
+            btnRefreshUsers.FlatAppearance.BorderSize         = 1;
             btnRefreshUsers.FlatAppearance.MouseOverBackColor = Color.FromArgb(55, 55, 78);
             btnRefreshUsers.Cursor    = Cursors.Hand;
             btnRefreshUsers.Click    += btnRefreshUsers_Click;
 
-            var sep1 = new Label
+            var sep1 = new Label { Height = 7, Dock = DockStyle.Top, BackColor = clrBgLeft };
+            var div1 = new Panel { Height = 1, Dock = DockStyle.Top, BackColor = Color.FromArgb(55, 55, 72) };
+            var sep2 = new Label { Height = 7, Dock = DockStyle.Top, BackColor = clrBgLeft };
+
+            // ── Tiêu đề "Nhóm của tôi" ────────────────────────────────
+            lblGroupsTitle.Text      = "  Nhóm của tôi";
+            lblGroupsTitle.Font      = new Font("Segoe UI", 8.5F, FontStyle.Bold);
+            lblGroupsTitle.ForeColor = clrAccPink;
+            lblGroupsTitle.BackColor = clrBgLeft;
+            lblGroupsTitle.Dock      = DockStyle.Top;
+            lblGroupsTitle.Height    = 24;
+            lblGroupsTitle.TextAlign = ContentAlignment.MiddleLeft;
+
+            listBoxGroups.Dock                  = DockStyle.Top;
+            listBoxGroups.Height                = 100;
+            listBoxGroups.Font                  = new Font("Segoe UI", 9F);
+            listBoxGroups.BorderStyle           = BorderStyle.None;
+            listBoxGroups.SelectionMode         = SelectionMode.One;
+            listBoxGroups.BackColor             = clrBgList;
+            listBoxGroups.ForeColor             = clrTextMain;
+            listBoxGroups.Padding               = new Padding(4, 0, 0, 0);
+            listBoxGroups.DoubleClick          += listBoxGroups_DoubleClick;
+
+            // Hàng nút nhóm: [+ Tạo] [→ Tham gia]
+            pnlGroupButtons.Dock      = DockStyle.Top;
+            pnlGroupButtons.Height    = 28;
+            pnlGroupButtons.BackColor = clrBgLeft;
+
+            btnCreateGroup.Text      = "+ Tạo";
+            btnCreateGroup.Font      = new Font("Segoe UI", 8.5F);
+            btnCreateGroup.Dock      = DockStyle.Left;
+            btnCreateGroup.Width     = 108;
+            btnCreateGroup.BackColor = clrAccGreen;
+            btnCreateGroup.ForeColor = Color.White;
+            btnCreateGroup.FlatStyle = FlatStyle.Flat;
+            btnCreateGroup.FlatAppearance.BorderSize         = 0;
+            btnCreateGroup.FlatAppearance.MouseOverBackColor = Color.FromArgb(0, 185, 128);
+            btnCreateGroup.Cursor    = Cursors.Hand;
+            btnCreateGroup.Click    += btnCreateGroup_Click;
+
+            btnJoinGroup.Text      = "→ Tham gia";
+            btnJoinGroup.Font      = new Font("Segoe UI", 8.5F);
+            btnJoinGroup.Dock      = DockStyle.Fill;
+            btnJoinGroup.BackColor = Color.FromArgb(50, 80, 130);
+            btnJoinGroup.ForeColor = Color.White;
+            btnJoinGroup.FlatStyle = FlatStyle.Flat;
+            btnJoinGroup.FlatAppearance.BorderSize         = 0;
+            btnJoinGroup.FlatAppearance.MouseOverBackColor = Color.FromArgb(60, 100, 160);
+            btnJoinGroup.Cursor    = Cursors.Hand;
+            btnJoinGroup.Click    += btnJoinGroup_Click;
+
+            pnlGroupButtons.Controls.Add(btnJoinGroup);
+            pnlGroupButtons.Controls.Add(btnCreateGroup);
+
+            var sep3 = new Label { Height = 7, Dock = DockStyle.Top, BackColor = clrBgLeft };
+            var div2 = new Panel { Height = 1, Dock = DockStyle.Top, BackColor = Color.FromArgb(55, 55, 72) };
+            var sep4 = new Label { Height = 7, Dock = DockStyle.Top, BackColor = clrBgLeft };
+
+            // ── Peer info panel (avatar + tên peer + nút gọi) ─────────
+            pnlPeerInfo.Dock      = DockStyle.Top;
+            pnlPeerInfo.Height    = 52;
+            pnlPeerInfo.BackColor = clrBgLeft;
+            pnlPeerInfo.Padding   = new Padding(0);
+
+            var pnlPeerAvatarWrap = new Panel
             {
-                Height    = 8,
-                Dock      = DockStyle.Top,
+                Dock      = DockStyle.Left,
+                Width     = 52,
                 BackColor = clrBgLeft
             };
+            picPeerAvatar.Size      = new Size(34, 34);
+            picPeerAvatar.Location  = new Point(9, 9);
+            picPeerAvatar.SizeMode  = PictureBoxSizeMode.StretchImage;
+            picPeerAvatar.BackColor = Color.FromArgb(50, 50, 72);
+            pnlPeerAvatarWrap.Controls.Add(picPeerAvatar);
 
-            var divider = new Panel
-            {
-                Height    = 1,
-                Dock      = DockStyle.Top,
-                BackColor = Color.FromArgb(55, 55, 72)
-            };
-
-            var sep2 = new Label
-            {
-                Height    = 8,
-                Dock      = DockStyle.Top,
-                BackColor = clrBgLeft
-            };
-
-            // Label hiển thị trạng thái kết nối hiện tại
             lblPeerInfo.Text      = "Chọn user để bắt đầu chat";
             lblPeerInfo.Font      = new Font("Segoe UI", 8.5F, FontStyle.Italic);
             lblPeerInfo.ForeColor = clrTextHint;
             lblPeerInfo.BackColor = clrBgLeft;
-            lblPeerInfo.Dock      = DockStyle.Top;
-            lblPeerInfo.Height    = 36;
+            lblPeerInfo.Dock      = DockStyle.Fill;
             lblPeerInfo.TextAlign = ContentAlignment.MiddleLeft;
             lblPeerInfo.Padding   = new Padding(4, 0, 4, 0);
 
-            // Thứ tự thêm Dock=Top: LIFO (thêm sau hiện trên)
-            pnlLeft.Controls.Add(lblPeerInfo);
+            btnCall.Text      = "📞";
+            btnCall.Font      = new Font("Segoe UI", 12F);
+            btnCall.Dock      = DockStyle.Right;
+            btnCall.Width     = 46;
+            btnCall.BackColor = Color.FromArgb(0, 140, 90);
+            btnCall.ForeColor = Color.White;
+            btnCall.FlatStyle = FlatStyle.Flat;
+            btnCall.FlatAppearance.BorderSize         = 0;
+            btnCall.FlatAppearance.MouseOverBackColor = Color.FromArgb(0, 168, 110);
+            btnCall.Cursor    = Cursors.Hand;
+            btnCall.Visible   = false;
+            btnCall.Click    += btnCall_Click;
+
+            // LIFO: Fill được thêm đầu tiên, Right/Left thêm sau
+            pnlPeerInfo.Controls.Add(lblPeerInfo);
+            pnlPeerInfo.Controls.Add(btnCall);
+            pnlPeerInfo.Controls.Add(pnlPeerAvatarWrap);
+
+            // ── User profile bar (đáy sidebar, giống Discord) ─────────
+            var divProfile = new Panel
+            {
+                Height    = 1,
+                Dock      = DockStyle.Top,
+                BackColor = Color.FromArgb(35, 35, 50)
+            };
+
+            pnlUserProfile.Dock      = DockStyle.Top;
+            pnlUserProfile.Height    = 58;
+            pnlUserProfile.BackColor = clrUserProfile;
+            pnlUserProfile.Padding   = new Padding(0);
+
+            var pnlMyAvatarWrap = new Panel
+            {
+                Dock      = DockStyle.Left,
+                Width     = 56,
+                BackColor = clrUserProfile
+            };
+            picMyAvatar.Size      = new Size(40, 40);
+            picMyAvatar.Location  = new Point(8, 9);
+            picMyAvatar.SizeMode  = PictureBoxSizeMode.StretchImage;
+            picMyAvatar.BackColor = Color.FromArgb(50, 50, 72);
+            picMyAvatar.Cursor    = Cursors.Hand;
+            picMyAvatar.Click    += picMyAvatar_Click;
+
+            var toolTip = new ToolTip();
+            toolTip.SetToolTip(picMyAvatar, "Click để đổi ảnh đại diện");
+            pnlMyAvatarWrap.Controls.Add(picMyAvatar);
+
+            lblMyUsername.Text      = "...";
+            lblMyUsername.Font      = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+            lblMyUsername.ForeColor = clrTextMain;
+            lblMyUsername.BackColor = clrUserProfile;
+            lblMyUsername.Dock      = DockStyle.Fill;
+            lblMyUsername.TextAlign = ContentAlignment.MiddleLeft;
+            lblMyUsername.Padding   = new Padding(2, 0, 0, 0);
+
+            pnlUserProfile.Controls.Add(lblMyUsername);
+            pnlUserProfile.Controls.Add(pnlMyAvatarWrap);
+
+            // ── Thêm vào pnlLeft (LIFO Dock=Top) ─────────────────────
+            pnlLeft.Controls.Add(pnlUserProfile);   // bottom
+            pnlLeft.Controls.Add(divProfile);
+            pnlLeft.Controls.Add(pnlPeerInfo);
+            pnlLeft.Controls.Add(sep4);
+            pnlLeft.Controls.Add(div2);
+            pnlLeft.Controls.Add(sep3);
+            pnlLeft.Controls.Add(pnlGroupButtons);
+            pnlLeft.Controls.Add(listBoxGroups);
+            pnlLeft.Controls.Add(lblGroupsTitle);
             pnlLeft.Controls.Add(sep2);
-            pnlLeft.Controls.Add(divider);
+            pnlLeft.Controls.Add(div1);
             pnlLeft.Controls.Add(sep1);
             pnlLeft.Controls.Add(btnRefreshUsers);
             pnlLeft.Controls.Add(listBoxUsers);
-            pnlLeft.Controls.Add(lblOnlineTitle);
+            pnlLeft.Controls.Add(lblOnlineTitle);   // top
 
             // ════════════════════════════════════════════════════════════
-            //  Panel dưới – TextBox nhập + Nút Gửi
+            //  Panel dưới — TextBox nhập + Nút Gửi
             // ════════════════════════════════════════════════════════════
             pnlBottom.Dock      = DockStyle.Bottom;
             pnlBottom.Height    = 50;
@@ -158,8 +298,8 @@ namespace Client_UI_App.Forms
             btnSendFile.BackColor = Color.FromArgb(50, 50, 70);
             btnSendFile.ForeColor = Color.FromArgb(180, 190, 210);
             btnSendFile.FlatStyle = FlatStyle.Flat;
-            btnSendFile.FlatAppearance.BorderColor     = Color.FromArgb(70, 70, 95);
-            btnSendFile.FlatAppearance.BorderSize      = 1;
+            btnSendFile.FlatAppearance.BorderColor        = Color.FromArgb(70, 70, 95);
+            btnSendFile.FlatAppearance.BorderSize         = 1;
             btnSendFile.FlatAppearance.MouseOverBackColor = Color.FromArgb(65, 65, 90);
             btnSendFile.Cursor    = Cursors.Hand;
             btnSendFile.Click    += btnSendFile_Click;
@@ -172,14 +312,12 @@ namespace Client_UI_App.Forms
             txtMessage.PlaceholderText = "Nhập tin nhắn... (Enter để gửi)";
             txtMessage.KeyDown        += txtMessage_KeyDown;
 
-            // Thứ tự Add quyết định vị trí: add sau = dock phải hơn
-            // Kết quả: [txtMessage (Fill)][btnSendFile][btnSend (phải nhất)]
             pnlBottom.Controls.Add(txtMessage);
             pnlBottom.Controls.Add(btnSendFile);
             pnlBottom.Controls.Add(btnSend);
 
             // ════════════════════════════════════════════════════════════
-            //  Panel phải – Khung chat
+            //  Panel phải — Khung chat
             // ════════════════════════════════════════════════════════════
             pnlRight.Dock      = DockStyle.Fill;
             pnlRight.BackColor = clrBgRight;
@@ -220,12 +358,11 @@ namespace Client_UI_App.Forms
             this.AutoScaleDimensions = new SizeF(7F, 15F);
             this.AutoScaleMode       = AutoScaleMode.Font;
             this.BackColor           = clrBgDeep;
-            this.ClientSize          = new Size(920, 620);
-            this.MinimumSize         = new Size(760, 500);
+            this.ClientSize          = new Size(960, 660);
+            this.MinimumSize         = new Size(800, 540);
             this.StartPosition       = FormStartPosition.CenterScreen;
             this.Text                = "Uiti-chan Chat";
 
-            // Thứ tự: Left → Status → Fill (Right)
             this.Controls.Add(pnlRight);
             this.Controls.Add(pnlStatus);
             this.Controls.Add(pnlLeft);
@@ -234,6 +371,9 @@ namespace Client_UI_App.Forms
             this.FormClosing += MainChatForm_FormClosing;
 
             pnlLeft.ResumeLayout(false);
+            pnlGroupButtons.ResumeLayout(false);
+            pnlPeerInfo.ResumeLayout(false);
+            pnlUserProfile.ResumeLayout(false);
             pnlRight.ResumeLayout(false);
             pnlBottom.ResumeLayout(false);
             pnlStatus.ResumeLayout(false);
@@ -245,7 +385,20 @@ namespace Client_UI_App.Forms
         private Label       lblOnlineTitle;
         private ListBox     listBoxUsers;
         private Button      btnRefreshUsers;
+        private Panel       pnlGroupButtons;
+        private Button      btnCreateGroup;
+        private Button      btnJoinGroup;
+        private Label       lblGroupsTitle;
+        private ListBox     listBoxGroups;
+
+        private Panel       pnlPeerInfo;
+        private PictureBox  picPeerAvatar;
         private Label       lblPeerInfo;
+        private Button      btnCall;
+
+        private Panel       pnlUserProfile;
+        private PictureBox  picMyAvatar;
+        private Label       lblMyUsername;
 
         private Panel       pnlRight;
         private RichTextBox rtbChat;
