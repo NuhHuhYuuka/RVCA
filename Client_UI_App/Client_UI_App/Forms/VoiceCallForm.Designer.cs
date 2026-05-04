@@ -53,7 +53,7 @@ namespace Client_UI_App.Forms
 
             // ── Subtitle panel (bot call only, Dock=Bottom) ───────────
             pnlSubtitle.Dock      = DockStyle.Bottom;
-            pnlSubtitle.Height    = 130;
+            pnlSubtitle.Height    = 160;
             pnlSubtitle.BackColor = Color.FromArgb(16, 16, 26);
             pnlSubtitle.Visible   = false;
 
@@ -61,7 +61,7 @@ namespace Client_UI_App.Forms
             rtbSubtitle.ReadOnly    = true;
             rtbSubtitle.BackColor   = Color.FromArgb(16, 16, 26);
             rtbSubtitle.ForeColor   = Color.FromArgb(200, 200, 220);
-            rtbSubtitle.Font        = new Font("Segoe UI", 11F);
+            rtbSubtitle.Font        = new Font("Segoe UI", 15F);
             rtbSubtitle.BorderStyle = BorderStyle.None;
             rtbSubtitle.ScrollBars  = RichTextBoxScrollBars.Vertical;
             rtbSubtitle.Padding     = new Padding(6);
@@ -95,8 +95,8 @@ namespace Client_UI_App.Forms
             // ── Trạng thái ────────────────────────────────────────────
             lblStatus.AutoSize  = false;
             lblStatus.Dock      = DockStyle.Top;
-            lblStatus.Height    = 26;
-            lblStatus.Font      = new Font("Segoe UI", 10F, FontStyle.Italic);
+            lblStatus.Height    = 30;
+            lblStatus.Font      = new Font("Segoe UI", 13F, FontStyle.Italic);
             lblStatus.ForeColor = clrTextHint;
             lblStatus.BackColor = clrCard;
             lblStatus.TextAlign = ContentAlignment.MiddleCenter;
@@ -117,15 +117,15 @@ namespace Client_UI_App.Forms
             // ── Mic level ─────────────────────────────────────────────
             lblMicIcon.AutoSize  = false;
             lblMicIcon.Dock      = DockStyle.Top;
-            lblMicIcon.Height    = 22;
+            lblMicIcon.Height    = 30;
             lblMicIcon.Text      = "🎤  Microphone";
-            lblMicIcon.Font      = new Font("Segoe UI", 9F);
+            lblMicIcon.Font      = new Font("Segoe UI", 13F);
             lblMicIcon.ForeColor = clrTextHint;
             lblMicIcon.BackColor = clrCard;
             lblMicIcon.TextAlign = ContentAlignment.MiddleLeft;
 
             pbMic.Dock      = DockStyle.Top;
-            pbMic.Height    = 10;
+            pbMic.Height    = 14;
             pbMic.Minimum   = 0;
             pbMic.Maximum   = 1000;
             pbMic.Value     = 0;
@@ -138,15 +138,15 @@ namespace Client_UI_App.Forms
             // ── Speaker level ─────────────────────────────────────────
             lblSpkIcon.AutoSize  = false;
             lblSpkIcon.Dock      = DockStyle.Top;
-            lblSpkIcon.Height    = 22;
+            lblSpkIcon.Height    = 30;
             lblSpkIcon.Text      = "🔊  Loa";
-            lblSpkIcon.Font      = new Font("Segoe UI", 9F);
+            lblSpkIcon.Font      = new Font("Segoe UI", 13F);
             lblSpkIcon.ForeColor = clrTextHint;
             lblSpkIcon.BackColor = clrCard;
             lblSpkIcon.TextAlign = ContentAlignment.MiddleLeft;
 
             pbSpk.Dock      = DockStyle.Top;
-            pbSpk.Height    = 10;
+            pbSpk.Height    = 14;
             pbSpk.Minimum   = 0;
             pbSpk.Maximum   = 1000;
             pbSpk.Value     = 0;
@@ -158,12 +158,12 @@ namespace Client_UI_App.Forms
 
             // ── Hàng nút ──────────────────────────────────────────────
             pnlButtons.Dock      = DockStyle.Top;
-            pnlButtons.Height    = 52;
+            pnlButtons.Height    = 66;
             pnlButtons.BackColor = clrCard;
 
             btnMute.Text      = "🔇  Tắt mic";
-            btnMute.Font      = new Font("Segoe UI", 10F);
-            btnMute.Size      = new Size(120, 44);
+            btnMute.Font      = new Font("Segoe UI", 13F);
+            btnMute.Size      = new Size(140, 54);
             btnMute.Location  = new Point(0, 4);
             btnMute.BackColor = Color.FromArgb(50, 50, 72);
             btnMute.ForeColor = clrTextMain;
@@ -175,9 +175,9 @@ namespace Client_UI_App.Forms
             btnMute.Click    += btnMute_Click;
 
             btnHangup.Text      = "📵  Cúp máy";
-            btnHangup.Font      = new Font("Segoe UI", 10F, FontStyle.Bold);
-            btnHangup.Size      = new Size(130, 44);
-            btnHangup.Location  = new Point(128, 4);
+            btnHangup.Font      = new Font("Segoe UI", 13F, FontStyle.Bold);
+            btnHangup.Size      = new Size(150, 54);
+            btnHangup.Location  = new Point(148, 4);
             btnHangup.BackColor = clrRed;
             btnHangup.ForeColor = Color.White;
             btnHangup.FlatStyle = FlatStyle.Flat;
