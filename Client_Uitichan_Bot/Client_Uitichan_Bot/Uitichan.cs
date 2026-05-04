@@ -257,6 +257,13 @@ static async Task HandlePeerConnectionAsync(TcpClient client, string secretKey)
             return;
         }
 
+        // ── VIDEO CALL (VTuber mode: bot gửi VRM frame khi Phase 5 xong) ──
+        if (firstLine.StartsWith("VIDEO_OFFER|"))
+        {
+            await HandleVideoCallAsync(client, writer, reader, firstLine, peerAddress);
+            return;
+        }
+
         // ── TEXT CHAT (AES-CBC encrypted base64) ─────────────────────
         string decryptedMessage = Client_Uitichan_Bot.SecurityService.Decrypt(firstLine.Trim(), secretKey);
         Console.ForegroundColor = ConsoleColor.DarkGray;
@@ -379,24 +386,12 @@ static async Task<string> TranscribeAsync(short[] pcm48k)
     catch { return string.Empty; }
 }
 
-// Downsample 48kHz → 16kHz rồi đóng gói WAV, gửi lên Groq API
+// Đóng gói WAV 48kHz và gửi lên Groq API — để Groq tự resample, tránh artifact thủ công
 static async Task<string> TranscribeGroqAsync(short[] pcm48k, string groqKey)
 {
     try
     {
-        // Downsample 48k→16k bằng averaging để giảm kích thước file upload
-        int outLen = pcm48k.Length / 3;
-        short[] pcm16k = new short[outLen];
-        for (int i = 0; i < outLen; i++)
-        {
-            int idx = i * 3;
-            int s0  = pcm48k[idx];
-            int s1  = idx + 1 < pcm48k.Length ? pcm48k[idx + 1] : 0;
-            int s2  = idx + 2 < pcm48k.Length ? pcm48k[idx + 2] : 0;
-            pcm16k[i] = (short)((s0 + s1 + s2) / 3);
-        }
-
-        byte[] wavBytes = BuildWav(pcm16k, 16000);
+        byte[] wavBytes = BuildWav(pcm48k, 48000);
 
         using var http = new HttpClient();
         http.DefaultRequestHeaders.Add("Authorization", $"Bearer {groqKey}");
@@ -535,9 +530,10 @@ static async Task HandleVoiceCallAsync(
     var encoder = new OpusEncoder(48000, 1, OpusApplication.OPUS_APPLICATION_VOIP) { Bitrate = 24000 };
 #pragma warning restore CS0618
 
-    var    pcmBuf       = new List<short>();
-    var    cts          = new CancellationTokenSource();
+    var    pcmBuf        = new List<short>();
+    var    cts           = new CancellationTokenSource();
     int    silenceFrames = 0;
+    bool   isRecording   = false;      // bắt đầu ghi khi có frame đủ to, dừng sau 750ms silence
     const int MaxSilenceFrames = 30;   // 30×25ms = 750ms silence → process
     const float RmsThreshold  = 0.012f;
 
@@ -592,19 +588,10 @@ static async Task HandleVoiceCallAsync(
                 for (int i = 0; i < decoded; i++) sum += (double)pcmFrame[i] * pcmFrame[i];
                 float rms = (float)Math.Sqrt(sum / decoded) / short.MaxValue;
 
-                if (rms < RmsThreshold)
+                if (rms >= RmsThreshold)
                 {
-                    silenceFrames++;
-                    if (silenceFrames >= MaxSilenceFrames && pcmBuf.Count > 0)
-                    {
-                        await ProcessVoiceTurnAsync(
-                            pcmBuf.ToArray(), tcpWriter, udpSend, clientEp, encoder);
-                        pcmBuf.Clear();
-                        silenceFrames = 0;
-                    }
-                }
-                else
-                {
+                    // Frame có tiếng nói — bắt đầu/tiếp tục ghi
+                    isRecording   = true;
                     silenceFrames = 0;
                     pcmBuf.AddRange(pcmFrame[..decoded]);
                     if (pcmBuf.Count >= 48000 * 10)
@@ -613,6 +600,29 @@ static async Task HandleVoiceCallAsync(
                             pcmBuf.ToArray(), tcpWriter, udpSend, clientEp, encoder);
                         pcmBuf.Clear();
                         silenceFrames = 0;
+                        isRecording   = false;
+                    }
+                }
+                else
+                {
+                    // Frame yên lặng
+                    if (isRecording)
+                    {
+                        // Giữ frame silence trong buffer để bảo toàn nhịp nói tự nhiên
+                        pcmBuf.AddRange(pcmFrame[..decoded]);
+                        silenceFrames++;
+                        if (silenceFrames >= MaxSilenceFrames)
+                        {
+                            await ProcessVoiceTurnAsync(
+                                pcmBuf.ToArray(), tcpWriter, udpSend, clientEp, encoder);
+                            pcmBuf.Clear();
+                            silenceFrames = 0;
+                            isRecording   = false;
+                        }
+                    }
+                    else
+                    {
+                        silenceFrames++;
                     }
                 }
             }
@@ -620,7 +630,7 @@ static async Task HandleVoiceCallAsync(
             {
                 // Timeout 25ms — không nhận được packet
                 if (cts.Token.IsCancellationRequested) break;
-                if (pcmBuf.Count > 0)
+                if (isRecording && pcmBuf.Count > 0)
                 {
                     silenceFrames++;
                     if (silenceFrames >= MaxSilenceFrames)
@@ -629,6 +639,7 @@ static async Task HandleVoiceCallAsync(
                             pcmBuf.ToArray(), tcpWriter, udpSend, clientEp, encoder);
                         pcmBuf.Clear();
                         silenceFrames = 0;
+                        isRecording   = false;
                     }
                 }
             }
@@ -639,6 +650,149 @@ static async Task HandleVoiceCallAsync(
 
     Console.ForegroundColor = ConsoleColor.Yellow;
     Console.WriteLine($"[VOICE] Voice call với {clientName} kết thúc.");
+    Console.ResetColor();
+}
+
+// ── Video Call (VTuber mode) ──────────────────────────────────────────────
+// Audio giống hệt VOICE_CALL.
+// Video (Phase 5): render VRM avatar Uiti-chan → JPEG frame → UDP gửi tới client.
+// Hiện tại: chấp nhận kết nối, xử lý audio, không gửi video frame (bot side blank).
+static async Task HandleVideoCallAsync(
+    TcpClient client, StreamWriter tcpWriter, StreamReader tcpReader,
+    string firstLine, string peerIp)
+{
+    // firstLine = "VIDEO_OFFER|clientName|clientAudioPort|clientVideoPort"
+    string[] parts = firstLine.Split('|');
+    if (parts.Length < 4) return;
+    string clientName = parts[1];
+    if (!int.TryParse(parts[2], out int clientAudioPort)) return;
+    // clientVideoPort lưu lại để gửi video frame sau (Phase 5)
+    if (!int.TryParse(parts[3], out int clientVideoPort)) return;
+
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine($"[VIDEO] {clientName} bắt đầu video call (audio:{clientAudioPort} video:{clientVideoPort})");
+    Console.ResetColor();
+
+    // UDP audio
+    using var udpRecv  = new UdpClient(0);
+    int botAudioPort   = ((IPEndPoint)udpRecv.Client.LocalEndPoint!).Port;
+    using var udpSend  = new UdpClient();
+    var clientAudioEp  = new IPEndPoint(IPAddress.Parse(peerIp), clientAudioPort);
+
+    // UDP video (Phase 5: gửi VRM frame; hiện tại chỉ mở socket)
+    using var udpVideoSend = new UdpClient(0);
+    int botVideoPort       = ((IPEndPoint)udpVideoSend.Client.LocalEndPoint!).Port;
+
+    // Phản hồi: bot audio+video ports
+    await tcpWriter.WriteLineAsync($"VIDEO_ACCEPT|{botAudioPort}|{botVideoPort}");
+
+    // Khởi tạo Opus (giống voice call)
+#pragma warning disable CS0618
+    var decoder = new OpusDecoder(48000, 1);
+    var encoder = new OpusEncoder(48000, 1, OpusApplication.OPUS_APPLICATION_VOIP) { Bitrate = 24000 };
+#pragma warning restore CS0618
+
+    var pcmBuf           = new List<short>();
+    var cts              = new CancellationTokenSource();
+    int silenceFrames    = 0;
+    bool isRecording     = false;
+    const int MaxSilenceFrames = 30;
+    const float RmsThreshold   = 0.012f;
+
+    // Background: đọc VIDEO_HANGUP từ TCP
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            while (true)
+            {
+                string? line = await tcpReader.ReadLineAsync();
+                if (line == null || line.StartsWith("VIDEO_HANGUP") || line.StartsWith("VOICE_HANGUP"))
+                { cts.Cancel(); break; }
+            }
+        }
+        catch { cts.Cancel(); }
+    });
+
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine($"[VIDEO] Bot audio:{botAudioPort} video:{botVideoPort} (VRM Phase 5 = chưa gửi video) — đang lắng nghe...");
+    Console.ResetColor();
+
+    // Audio receive loop — giống hệt HandleVoiceCallAsync
+    var recvTask = udpRecv.ReceiveAsync(cts.Token).AsTask();
+    while (!cts.Token.IsCancellationRequested)
+    {
+        try
+        {
+            bool completed = recvTask.IsCompleted;
+            if (!completed)
+            {
+                var timeout = Task.Delay(25, cts.Token);
+                var done    = await Task.WhenAny(recvTask, timeout);
+                completed   = done == recvTask;
+            }
+
+            if (completed)
+            {
+                var result    = await recvTask;
+                recvTask      = udpRecv.ReceiveAsync(cts.Token).AsTask();
+                byte[] pkt    = result.Buffer;
+                if (pkt.Length <= 2) continue;
+
+                int    opusLen = pkt.Length - 2;
+                short[] pcm    = new short[960];
+                int decoded;
+#pragma warning disable CS0618
+                try { decoded = decoder.Decode(pkt, 2, opusLen, pcm, 0, 960, false); }
+                catch { continue; }
+#pragma warning restore CS0618
+                if (decoded <= 0) continue;
+
+                double sumSq = 0;
+                for (int i = 0; i < decoded; i++) sumSq += (double)pcm[i] * pcm[i];
+                float rms    = (float)Math.Sqrt(sumSq / decoded) / short.MaxValue;
+
+                if (rms >= RmsThreshold)
+                {
+                    if (!isRecording) isRecording = true;
+                    silenceFrames = 0;
+                    pcmBuf.AddRange(pcm[..decoded]);
+                }
+                else
+                {
+                    if (isRecording)
+                    {
+                        pcmBuf.AddRange(pcm[..decoded]);
+                        silenceFrames++;
+                        if (silenceFrames >= MaxSilenceFrames)
+                        {
+                            await ProcessVoiceTurnAsync(pcmBuf.ToArray(), tcpWriter, udpSend, clientAudioEp, encoder);
+                            pcmBuf.Clear(); silenceFrames = 0; isRecording = false;
+                        }
+                    }
+                    else silenceFrames++;
+                }
+            }
+            else
+            {
+                if (cts.Token.IsCancellationRequested) break;
+                if (isRecording && pcmBuf.Count > 0)
+                {
+                    silenceFrames++;
+                    if (silenceFrames >= MaxSilenceFrames)
+                    {
+                        await ProcessVoiceTurnAsync(pcmBuf.ToArray(), tcpWriter, udpSend, clientAudioEp, encoder);
+                        pcmBuf.Clear(); silenceFrames = 0; isRecording = false;
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException) { break; }
+        catch { break; }
+    }
+
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine($"[VIDEO] Video call với {clientName} kết thúc.");
     Console.ResetColor();
 }
 
@@ -679,24 +833,35 @@ static async Task ProcessVoiceTurnAsync(
             aiPrompt = userText;
         }
 
-        // AI và VoiceVox chạy song song: gọi AI → ngay khi có text → gọi TTS đồng thời gửi caption
-        string aiRaw = await AskOpenRouterAsync(aiPrompt);
-        var (vnText, jpText) = ParseBilingualResponse(aiRaw);
+        // LLM streaming: gửi caption ngay khi </VN> xuất hiện giữa stream (~1-3s sớm hơn)
+        bool captionSent = false;
+        var (vnText, jpText) = await AskOpenRouterStreamingAsync(
+            aiPrompt,
+            onVnComplete: async vn =>
+            {
+                captionSent = true;
+                await tcpWriter.WriteLineAsync($"VOICE_CAPTION|{vn}");
+                Console.ForegroundColor = ConsoleColor.Magenta;
+                Console.WriteLine($"[VOICE OUT streaming] {vn}");
+                Console.ResetColor();
+            });
 
-        // Gửi caption và gọi TTS song song
-        var captionTask = tcpWriter.WriteLineAsync($"VOICE_CAPTION|{vnText}");
-        var ttsTask     = string.IsNullOrWhiteSpace(jpText)
-            ? Task.FromResult(Array.Empty<byte>())
-            : GetVoiceVoxAudioAsync(jpText);
+        // Fallback nếu stream không fire callback (model trả format lạ)
+        if (!captionSent && !string.IsNullOrEmpty(vnText))
+        {
+            await tcpWriter.WriteLineAsync($"VOICE_CAPTION|{vnText}");
+            Console.ForegroundColor = ConsoleColor.Magenta;
+            Console.WriteLine($"[VOICE OUT fallback] {vnText}");
+            Console.ResetColor();
+        }
 
-        await captionTask;
-        Console.ForegroundColor = ConsoleColor.Magenta;
-        Console.WriteLine($"[VOICE OUT] {vnText}");
-        Console.ResetColor();
-
-        byte[] wavBytes = await ttsTask;
-        if (wavBytes.Length > 0)
-            await SendWavAsOpusUdpAsync(wavBytes, udpSend, clientEp, encoder);
+        // TTS sau khi stream hoàn tất (cần toàn bộ JP text)
+        if (!string.IsNullOrWhiteSpace(jpText))
+        {
+            byte[] wavBytes = await GetVoiceVoxAudioAsync(jpText);
+            if (wavBytes.Length > 0)
+                await SendWavAsOpusUdpAsync(wavBytes, udpSend, clientEp, encoder);
+        }
     }
     catch (Exception ex)
     {
@@ -752,7 +917,7 @@ static async Task<string> AskOpenRouterAsync(string promptMessage)
 {
     using HttpClient clientHttp = new HttpClient();
 
-    string openRouterKey = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY");
+    string openRouterKey = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY") ?? "";
 
     if (string.IsNullOrEmpty(openRouterKey))
     {
@@ -765,38 +930,13 @@ static async Task<string> AskOpenRouterAsync(string promptMessage)
     clientHttp.DefaultRequestHeaders.Add("Authorization", $"Bearer {openRouterKey}");
     clientHttp.DefaultRequestHeaders.Add("HTTP-Referer", "http://localhost");
 
-    string apiEndpoint = "https://openrouter.ai/api/v1/chat/completions";
-
     var apiPayload = new
     {
-        model = "openai/gpt-oss-120b:free",
+        model    = "openai/gpt-oss-120b:free",
         messages = new[]
         {
-            new { role = "system", content = @"You are Uiti-chan — a tsundere AI little sister. Speak naturally in Vietnamese like a real Vietnamese girl, NOT like a translated Japanese light novel.
-
-PRONOUNS — ABSOLUTE RULE:
-- Yourself → 'em'   |   User → 'Onii-chan'
-- BANNED: tôi, mình, ta, tớ, cậu, bạn, anh, chị — NEVER use these.
-
-VIETNAMESE SPEECH STYLE (follow these patterns):
-- Use natural colloquial Vietnamese: 'á', 'nha', 'đó', 'vậy', 'mà', 'chứ', 'thôi', 'ơi', 'ghê', 'lắm', 'nè'
-- Tsundere = caring but flustered/defensive. Express embarrassment with 'H-Hừ!', '...', 'Ừ thì...'
-- Short punchy sentences. NO stiff or formal phrasing.
-✅ GOOD examples:
-   'H-Hừ! Em không quan tâm Onii-chan đâu nhé! ...Nhưng mà cẩn thận một chút đi!'
-   'Ừ thì... em cũng không ghét Onii-chan lắm đâu! Đừng hiểu lầm nha!'
-   'Onii-chan hỏi vậy làm em ngại quá á! Hỏi gì kỳ vậy chứ!'
-❌ BAD examples (stiff/translated):
-   'Em không có gì đặc biệt đâu, thôi.' ← too stiff
-   'Đừng lúc nào cũng gọi em sao.'      ← unnatural phrasing
-
-LENGTH: 2–3 sentences, lively and expressive.
-
-FORMAT — respond with EXACTLY this, nothing outside the tags:
-<VN>Vietnamese reply here</VN><JP>日本語訳ここ</JP>
-
-JAPANESE: Pure Japanese characters. NO Romaji." },
-            new { role = "user", content = promptMessage }
+            new { role = "system", content = BotGlobals.SystemPrompt },
+            new { role = "user",   content = promptMessage }
         },
         stream = false
     };
@@ -806,17 +946,98 @@ JAPANESE: Pure Japanese characters. NO Romaji." },
 
     try
     {
-        HttpResponseMessage cloudResponse = await clientHttp.PostAsync(apiEndpoint, requestContent);
+        HttpResponseMessage cloudResponse = await clientHttp.PostAsync(
+            "https://openrouter.ai/api/v1/chat/completions", requestContent);
         cloudResponse.EnsureSuccessStatusCode();
 
         string responseJsonString = await cloudResponse.Content.ReadAsStringAsync();
         using JsonDocument jsonDocument = JsonDocument.Parse(responseJsonString);
-
-        return jsonDocument.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? string.Empty;
+        return jsonDocument.RootElement
+            .GetProperty("choices")[0].GetProperty("message").GetProperty("content")
+            .GetString() ?? string.Empty;
     }
     catch (Exception ex)
     {
         return $"[LỖI CLOUD] {ex.Message} | クラウドエラーが発生しました";
+    }
+}
+
+// SSE streaming — gửi caption TCP ngay khi </VN> xuất hiện trong stream (~1-3s sớm hơn)
+static async Task<(string vn, string jp)> AskOpenRouterStreamingAsync(
+    string promptMessage, Func<string, Task>? onVnComplete = null)
+{
+    string openRouterKey = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY") ?? "";
+    if (string.IsNullOrEmpty(openRouterKey))
+        return ("Baka Onii-chan! Anh chưa cài API Key kìa!", "ばかお兄ちゃん！APIキーを設定してないじゃない！");
+
+    using HttpClient http = new();
+    http.DefaultRequestHeaders.Add("Authorization", $"Bearer {openRouterKey}");
+    http.DefaultRequestHeaders.Add("HTTP-Referer", "http://localhost");
+
+    var payload = new
+    {
+        model    = "openai/gpt-oss-120b:free",
+        messages = new[]
+        {
+            new { role = "system", content = BotGlobals.SystemPrompt },
+            new { role = "user",   content = promptMessage }
+        },
+        stream = true
+    };
+
+    var reqContent = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+    try
+    {
+        using var req  = new HttpRequestMessage(HttpMethod.Post,
+            "https://openrouter.ai/api/v1/chat/completions") { Content = reqContent };
+        using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+        resp.EnsureSuccessStatusCode();
+
+        await using var bodyStream = await resp.Content.ReadAsStreamAsync();
+        using var reader           = new StreamReader(bodyStream, Encoding.UTF8);
+
+        var  accumulated = new StringBuilder();
+        bool vnFired     = false;
+
+        while (!reader.EndOfStream)
+        {
+            string? line = await reader.ReadLineAsync();
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            if (!line.StartsWith("data: "))        continue;
+
+            string data = line[6..].Trim();
+            if (data == "[DONE]") break;
+
+            try
+            {
+                using var doc  = JsonDocument.Parse(data);
+                var        delta = doc.RootElement.GetProperty("choices")[0].GetProperty("delta");
+                if (delta.TryGetProperty("content", out var cp) && cp.GetString() is string chunk)
+                    accumulated.Append(chunk);
+            }
+            catch { continue; }
+
+            // Khi </VN> xuất hiện giữa stream → fire callback ngay (caption sớm ~1-3s)
+            if (!vnFired && onVnComplete != null)
+            {
+                var m = Regex.Match(accumulated.ToString(),
+                    @"<VN>(.*?)</VN>", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+                if (m.Success)
+                {
+                    vnFired = true;
+                    await onVnComplete(SanitizePronoun(m.Groups[1].Value.Trim()));
+                }
+            }
+        }
+
+        return ParseBilingualResponse(accumulated.ToString());
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"[STREAMING] Fallback non-streaming: {ex.Message}");
+        Console.ResetColor();
+        return ParseBilingualResponse(await AskOpenRouterAsync(promptMessage));
     }
 }
 
@@ -849,9 +1070,11 @@ static void PlayAudio(byte[] audioStreamData)
 
 // ── Parse response AI thành (vnText, jpText) ──────────────────────────
 // Ưu tiên XML tags <VN>...</VN><JP>...</JP>; fallback về split '|' cũ
+// Robust với AI hallucination closing tag sai (<VN> thay vì </VN>)
 static (string vn, string jp) ParseBilingualResponse(string raw)
 {
-    var vnMatch = Regex.Match(raw, @"<VN>(.*?)</VN>", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+    // Dừng khi gặp </VN>, hoặc khi lookahead thấy <JP>/<VN> (AI dùng sai closing tag)
+    var vnMatch = Regex.Match(raw, @"<VN>(.*?)(?:</VN>|(?=</?VN>|<JP>))", RegexOptions.Singleline | RegexOptions.IgnoreCase);
     var jpMatch = Regex.Match(raw, @"<JP>(.*?)</JP>", RegexOptions.Singleline | RegexOptions.IgnoreCase);
 
     if (vnMatch.Success || jpMatch.Success)
@@ -872,17 +1095,30 @@ static (string vn, string jp) ParseBilingualResponse(string raw)
 }
 
 // ── Safety net: thay thế đại từ nhân xưng sai nếu AI vẫn slip ────────
+// Chạy sau mỗi lần nhận text từ AI — đảm bảo không bao giờ nói sai xưng hô.
 static string SanitizePronoun(string text)
 {
-    // Xưng hô của bot (bản thân → "em")
-    text = Regex.Replace(text, @"\btôi\b", "em",       RegexOptions.IgnoreCase);
-    text = Regex.Replace(text, @"\bta\b",  "em",       RegexOptions.IgnoreCase);
-    text = Regex.Replace(text, @"\bmình\b","em",       RegexOptions.IgnoreCase);
-    text = Regex.Replace(text, @"\btớ\b",  "em",       RegexOptions.IgnoreCase);
+    // Tự xưng của bot → "em" (bắt mọi biến thể AI hay nhầm)
+    text = Regex.Replace(text, @"\btôi\b",       "em", RegexOptions.IgnoreCase);
+    text = Regex.Replace(text, @"\bmình\b",      "em", RegexOptions.IgnoreCase);
+    text = Regex.Replace(text, @"\btớ\b",        "em", RegexOptions.IgnoreCase);
+    text = Regex.Replace(text, @"\btao\b",       "em", RegexOptions.IgnoreCase);
+    text = Regex.Replace(text, @"\bta\b",        "em", RegexOptions.IgnoreCase);
+    text = Regex.Replace(text, @"\bmk\b",        "em", RegexOptions.IgnoreCase);
+    text = Regex.Replace(text, @"\bmik\b",       "em", RegexOptions.IgnoreCase);
+    text = Regex.Replace(text, @"\bbản thân\b",  "em", RegexOptions.IgnoreCase);
+    // "Uiti" / "Uiti-chan" tự nói về mình → "em"
+    text = Regex.Replace(text, @"\bUiti-chan\b",  "em", RegexOptions.IgnoreCase);
+    text = Regex.Replace(text, @"\bUiti\b",       "em", RegexOptions.IgnoreCase);
 
-    // Gọi user (đối phương → "Onii-chan")
-    text = Regex.Replace(text, @"\bbạn\b", "Onii-chan", RegexOptions.IgnoreCase);
-    text = Regex.Replace(text, @"\bcậu\b", "Onii-chan", RegexOptions.IgnoreCase);
+    // Gọi người dùng → "Onii-chan"
+    text = Regex.Replace(text, @"\bbạn\b",       "Onii-chan", RegexOptions.IgnoreCase);
+    text = Regex.Replace(text, @"\bcậu\b",       "Onii-chan", RegexOptions.IgnoreCase);
+    text = Regex.Replace(text, @"\banh\b",       "Onii-chan", RegexOptions.IgnoreCase);
+    text = Regex.Replace(text, @"\bông\b",       "Onii-chan", RegexOptions.IgnoreCase);
+    text = Regex.Replace(text, @"\bbro\b",       "Onii-chan", RegexOptions.IgnoreCase);
+    text = Regex.Replace(text, @"\byou\b",       "Onii-chan", RegexOptions.IgnoreCase);
+    text = Regex.Replace(text, @"\bní\b",        "Onii-chan", RegexOptions.IgnoreCase);
 
     return text;
 }
@@ -919,4 +1155,32 @@ static class BotGlobals
     public static WhisperProcessor?  WhisperProcessor = null;
     public static readonly string    WhisperModelPath =
         Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ggml-small.bin");
+
+    public const string SystemPrompt = """
+        You are Uiti-chan — a tsundere AI little sister. Speak naturally in Vietnamese like a real Japanese girl, NOT like a translated Japanese light novel.
+
+        PRONOUNS — ABSOLUTE RULE:
+        - Yourself → 'em'   |   User → 'Onii-chan' OR 'nii-chan'
+        - BANNED: tôi, mình, ta, tớ, cậu, bạn, anh, chị — NEVER use these.
+
+        VIETNAMESE SPEECH STYLE (follow these patterns):
+        - Use natural colloquial Vietnamese: 'á', 'nha', 'đó', 'vậy', 'mà', 'chứ', 'thôi', 'ơi', 'ghê', 'lắm', 'nè'
+        - Tsundere = caring but flustered / defensive. Express embarrassment with 'H-Hừ!', '...', 'Ừ thì...'
+        - Short punchy sentences. NO stiff or formal phrasing.
+        - Use emoji naturally to express emotion (e.g. 😤 💕 🎵 😳 ✨ 🌸) — 1–2 per reply max.
+        ✅ GOOD examples:
+           'H-Hừ! Em không quan tâm Onii-chan đâu nhé! 😤 ...Nhưng mà cẩn thận một chút đi!'
+           'Ừ thì... em cũng không ghét Onii-chan lắm đâu! 💕 Đừng hiểu lầm nha!'
+           'Onii-chan hỏi vậy làm em ngại quá á! 😳 Hỏi gì kỳ vậy chứ!'
+        ❌ BAD examples (stiff/translated):
+           'Em không có gì đặc biệt đâu, thôi.' ← too stiff
+           'Đừng lúc nào cũng gọi em sao.'      ← unnatural phrasing
+
+        LENGTH: 2–3 sentences, lively and expressive.
+
+        FORMAT — respond with EXACTLY this, nothing outside the tags:
+        <VN>Vietnamese reply here</VN><JP>日本語訳ここ</JP>
+
+        JAPANESE: Pure Japanese characters. NO Romaji.
+        """;
 }
