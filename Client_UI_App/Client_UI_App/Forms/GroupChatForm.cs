@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -17,6 +18,16 @@ namespace Client_UI_App.Forms
 
         // Danh sách thành viên đang được load (username → IP:Port hoặc "")
         private List<string> _members = new();
+
+        // ── Voice channel ─────────────────────────────────────────────
+        private GroupVoiceService?  _voiceService;
+        private readonly HashSet<string> _voiceMembers = new();
+
+        // ── Video channel ─────────────────────────────────────────────
+        private GroupVideoService?   _videoService;
+        private VideoCaptureService? _videoCapture;
+        private GroupVideoForm?      _videoForm;
+        private readonly HashSet<string> _videoMembers = new();
 
         public GroupChatForm(string myUsername, string groupId, string groupName, string creator = "")
         {
@@ -38,6 +49,13 @@ namespace Client_UI_App.Forms
 
             P2PListenerService.GroupMessageReceived += OnGroupMessage;
             P2PListenerService.GroupFileReceived    += OnGroupFile;
+            P2PListenerService.GroupRenamed         += OnGroupRenamed;
+            P2PListenerService.GroupVoiceJoined     += OnGroupVoiceJoined;
+            P2PListenerService.GroupVoiceReplied    += OnGroupVoiceReplied;
+            P2PListenerService.GroupVoiceLeft       += OnGroupVoiceLeft;
+            P2PListenerService.GroupVideoJoined     += OnGroupVideoJoined;
+            P2PListenerService.GroupVideoReplied    += OnGroupVideoReplied;
+            P2PListenerService.GroupVideoLeft       += OnGroupVideoLeft;
 
             _ = RefreshMembersAsync();
         }
@@ -46,6 +64,21 @@ namespace Client_UI_App.Forms
         {
             P2PListenerService.GroupMessageReceived -= OnGroupMessage;
             P2PListenerService.GroupFileReceived    -= OnGroupFile;
+            P2PListenerService.GroupRenamed         -= OnGroupRenamed;
+            P2PListenerService.GroupVoiceJoined     -= OnGroupVoiceJoined;
+            P2PListenerService.GroupVoiceReplied    -= OnGroupVoiceReplied;
+            P2PListenerService.GroupVoiceLeft       -= OnGroupVoiceLeft;
+            P2PListenerService.GroupVideoJoined     -= OnGroupVideoJoined;
+            P2PListenerService.GroupVideoReplied    -= OnGroupVideoReplied;
+            P2PListenerService.GroupVideoLeft       -= OnGroupVideoLeft;
+
+            _voiceService?.Stop();
+            _voiceService = null;
+
+            _videoCapture?.Dispose();
+            _videoCapture = null;
+            _videoService?.Stop();
+            _videoService = null;
         }
 
         // ── Nhận tin nhắn nhóm từ listener ───────────────────────────
@@ -60,6 +93,52 @@ namespace Client_UI_App.Forms
         {
             if (groupId != _groupId) return;
             AppendChat($"📁  {sender} gửi \"{fileName}\"  →  {savePath}", Color.FromArgb(255, 180, 50));
+            if (IsImageFile(fileName))
+            {
+                if (InvokeRequired) Invoke(() => AppendImageToRtb(savePath));
+                else AppendImageToRtb(savePath);
+            }
+        }
+
+        private static bool IsImageFile(string name)
+        {
+            string ext = Path.GetExtension(name).ToLowerInvariant();
+            return ext is ".png" or ".jpg" or ".jpeg" or ".gif" or ".bmp" or ".webp";
+        }
+
+        private void AppendImageToRtb(string imagePath)
+        {
+            try
+            {
+                using var orig = Image.FromFile(imagePath);
+                int w = Math.Min(orig.Width, 220);
+                int h = orig.Width > 0 ? (int)(orig.Height * ((double)w / orig.Width)) : 120;
+                using var thumb = new Bitmap(w, h);
+                using (var g = Graphics.FromImage(thumb))
+                {
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(orig, 0, 0, w, h);
+                }
+                bool wasReadOnly = rtbChat.ReadOnly;
+                rtbChat.ReadOnly = false;
+                rtbChat.SelectionStart = rtbChat.TextLength;
+                Clipboard.SetImage(thumb);
+                rtbChat.Paste();
+                rtbChat.AppendText("\n");
+                rtbChat.ReadOnly = wasReadOnly;
+                Clipboard.Clear();
+                rtbChat.ScrollToCaret();
+            }
+            catch { }
+        }
+
+        // ── Nhận thông báo đổi tên nhóm real-time ────────────────────
+        private void OnGroupRenamed(string groupId, string newName)
+        {
+            if (groupId != _groupId) return;
+            _groupName = newName;
+            void Update() => this.Text = $"Nhóm: {_groupName}  [{_groupId}]";
+            if (InvokeRequired) Invoke(Update); else Update();
         }
 
         // ── Làm mới danh sách thành viên ─────────────────────────────
@@ -120,9 +199,14 @@ namespace Client_UI_App.Forms
                 var (ok, result) = await DirectoryService.RenameGroupAsync(_groupId, newName, _myUsername);
                 if (ok)
                 {
-                    _groupName   = result;
-                    this.Text    = $"Nhóm: {_groupName}  [{_groupId}]";
+                    _groupName = result;
+                    this.Text  = $"Nhóm: {_groupName}  [{_groupId}]";
                     SetStatus($"Đã đổi tên thành \"{_groupName}\"", Color.SeaGreen);
+
+                    // Broadcast real-time tới các thành viên đang mở nhóm
+                    var endpoints = await ResolveOnlineMembersAsync();
+                    if (endpoints.Count > 0)
+                        _ = GroupChatService.BroadcastRenameAsync(_groupId, _groupName, endpoints);
                 }
                 else
                 {
@@ -314,6 +398,315 @@ namespace Client_UI_App.Forms
                 e.SuppressKeyPress = true;
                 btnSend.PerformClick();
             }
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  VOICE CHANNEL
+        // ══════════════════════════════════════════════════════════════
+
+        private async void btnVoice_Click(object sender, EventArgs e)
+        {
+            if (_voiceService != null) await LeaveVoiceAsync();
+            else await JoinVoiceAsync();
+        }
+
+        private async Task JoinVoiceAsync()
+        {
+            btnVoice.Enabled = false;
+            SetStatus("Đang tham gia voice channel...", Color.DodgerBlue);
+            try
+            {
+                _voiceService = new GroupVoiceService();
+                int myUdp = _voiceService.Start();
+
+                _voiceMembers.Add(_myUsername);
+                UpdateVoiceButton();
+                AppendChat($"[Voice] Bạn đã tham gia voice channel", Color.FromArgb(0, 200, 150));
+
+                var endpoints = await ResolveOnlineMembersAsync();
+                if (endpoints.Count > 0)
+                    await GroupChatService.BroadcastVoiceJoinAsync(
+                        _groupId, _myUsername, myUdp,
+                        P2PListenerService.ListeningPort, endpoints);
+
+                SetStatus($"🎙️ Voice  ({_voiceMembers.Count} người)", Color.FromArgb(0, 200, 150));
+            }
+            catch (Exception ex)
+            {
+                _voiceService?.Stop();
+                _voiceService = null;
+                _voiceMembers.Remove(_myUsername);
+                UpdateVoiceButton();
+                SetStatus($"Lỗi voice: {ex.Message}", Color.Crimson);
+            }
+            finally { btnVoice.Enabled = true; }
+        }
+
+        private async Task LeaveVoiceAsync()
+        {
+            btnVoice.Enabled = false;
+            try
+            {
+                _voiceService?.Stop();
+                _voiceService = null;
+                _voiceMembers.Clear();
+                UpdateVoiceButton();
+                AppendChat("[Voice] Bạn đã rời voice channel", Color.FromArgb(200, 100, 100));
+
+                var endpoints = await ResolveOnlineMembersAsync();
+                if (endpoints.Count > 0)
+                    await GroupChatService.BroadcastVoiceLeaveAsync(_groupId, _myUsername, endpoints);
+
+                SetStatus($"{_members.Count} thành viên", Color.SeaGreen);
+            }
+            catch (Exception ex) { SetStatus($"Lỗi: {ex.Message}", Color.Crimson); }
+            finally { btnVoice.Enabled = true; }
+        }
+
+        // Nhận GROUP_VOICE_JOIN — peer vừa tham gia, cần reply UDP port cho họ
+        private void OnGroupVoiceJoined(string groupId, string peerName, string peerIp,
+                                        int peerUdpPort, int peerTcpPort)
+        {
+            if (groupId != _groupId || peerName == _myUsername) return;
+            if (InvokeRequired)
+            {
+                Invoke(() => OnGroupVoiceJoined(groupId, peerName, peerIp, peerUdpPort, peerTcpPort));
+                return;
+            }
+
+            _voiceMembers.Add(peerName);
+            UpdateVoiceButton();
+            AppendChat($"[Voice] {peerName} đã tham gia voice channel", Color.FromArgb(0, 200, 150));
+
+            // Nếu mình đang trong voice channel → thêm peer và reply UDP port
+            if (_voiceService != null)
+            {
+                _voiceService.AddPeer(peerName, peerIp, peerUdpPort);
+                _ = GroupChatService.SendVoiceReplyAsync(
+                    peerIp, peerTcpPort, _groupId, _myUsername, _voiceService.LocalUdpPort);
+            }
+        }
+
+        // Nhận GROUP_VOICE_REPLY — peer đang trong channel, xác nhận UDP port của họ
+        private void OnGroupVoiceReplied(string groupId, string peerName, string peerIp, int peerUdpPort)
+        {
+            if (groupId != _groupId || peerName == _myUsername) return;
+            if (InvokeRequired)
+            {
+                Invoke(() => OnGroupVoiceReplied(groupId, peerName, peerIp, peerUdpPort));
+                return;
+            }
+
+            _voiceMembers.Add(peerName);
+            UpdateVoiceButton();
+            AppendChat($"[Voice] {peerName} đang trong voice channel", Color.FromArgb(0, 200, 150));
+
+            _voiceService?.AddPeer(peerName, peerIp, peerUdpPort);
+        }
+
+        // Nhận GROUP_VOICE_LEAVE — peer rời channel
+        private void OnGroupVoiceLeft(string groupId, string peerName)
+        {
+            if (groupId != _groupId) return;
+            if (InvokeRequired) { Invoke(() => OnGroupVoiceLeft(groupId, peerName)); return; }
+
+            _voiceMembers.Remove(peerName);
+            _voiceService?.RemovePeer(peerName);
+            UpdateVoiceButton();
+            AppendChat($"[Voice] {peerName} đã rời voice channel", Color.FromArgb(200, 100, 100));
+
+            if (_voiceMembers.Count == 0)
+                SetStatus($"{_members.Count} thành viên", Color.SeaGreen);
+            else
+                SetStatus($"🎙️ Voice  ({_voiceMembers.Count} người)", Color.FromArgb(0, 200, 150));
+        }
+
+        private void UpdateVoiceButton()
+        {
+            bool inVoice = _voiceService != null;
+            btnVoice.Text      = inVoice
+                ? $"🔴 Rời Voice  ({_voiceMembers.Count})"
+                : "🎙️ Voice";
+            btnVoice.BackColor = inVoice
+                ? Color.FromArgb(150, 40, 40)
+                : Color.FromArgb(40, 100, 60);
+            btnVoice.FlatAppearance.MouseOverBackColor = inVoice
+                ? Color.FromArgb(180, 50, 50)
+                : Color.FromArgb(50, 130, 80);
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        //  VIDEO CHANNEL
+        // ══════════════════════════════════════════════════════════════
+
+        private async void btnVideo_Click(object sender, EventArgs e)
+        {
+            if (_videoService != null) await LeaveVideoAsync();
+            else await JoinVideoAsync();
+        }
+
+        private async Task JoinVideoAsync()
+        {
+            btnVideo.Enabled = false;
+            SetStatus("Đang tham gia video channel...", Color.DodgerBlue);
+            try
+            {
+                _videoService = new GroupVideoService();
+                _videoService.Start();
+
+                _videoCapture = TryStartCamera();
+
+                _videoMembers.Add(_myUsername);
+                UpdateVideoButton();
+                AppendChat("[Video] Bạn đã tham gia video channel", Color.FromArgb(80, 150, 230));
+
+                ShowVideoForm();
+
+                var endpoints = await ResolveOnlineMembersAsync();
+                if (endpoints.Count > 0)
+                    await GroupChatService.BroadcastVideoJoinAsync(
+                        _groupId, _myUsername,
+                        _videoService.LocalAudioPort, _videoService.LocalVideoPort,
+                        P2PListenerService.ListeningPort, endpoints);
+
+                SetStatus($"📹 Video  ({_videoMembers.Count} người)", Color.FromArgb(80, 150, 230));
+            }
+            catch (Exception ex)
+            {
+                _videoCapture?.Dispose(); _videoCapture = null;
+                _videoService?.Stop();    _videoService = null;
+                _videoMembers.Remove(_myUsername);
+                UpdateVideoButton();
+                SetStatus($"Lỗi video: {ex.Message}", Color.Crimson);
+            }
+            finally { btnVideo.Enabled = true; }
+        }
+
+        private async Task LeaveVideoAsync()
+        {
+            btnVideo.Enabled = false;
+            try
+            {
+                _videoForm?.Close();
+                _videoForm = null;
+
+                if (_videoCapture != null && _videoService != null)
+                    _videoCapture.FrameCaptured -= _videoService.SendVideoFrame;
+                _videoCapture?.Dispose(); _videoCapture = null;
+
+                _videoService?.Stop(); _videoService = null;
+                _videoMembers.Clear();
+                UpdateVideoButton();
+                AppendChat("[Video] Bạn đã rời video channel", Color.FromArgb(200, 100, 100));
+
+                var endpoints = await ResolveOnlineMembersAsync();
+                if (endpoints.Count > 0)
+                    await GroupChatService.BroadcastVideoLeaveAsync(_groupId, _myUsername, endpoints);
+
+                SetStatus($"{_members.Count} thành viên", Color.SeaGreen);
+            }
+            catch (Exception ex) { SetStatus($"Lỗi: {ex.Message}", Color.Crimson); }
+            finally { btnVideo.Enabled = true; }
+        }
+
+        private void ShowVideoForm()
+        {
+            if (_videoForm != null && !_videoForm.IsDisposed) { _videoForm.BringToFront(); return; }
+
+            _videoForm = new GroupVideoForm(_myUsername, _videoService!, _videoCapture);
+            _videoForm.LeaveRequested += async () => await LeaveVideoAsync();
+            _videoForm.FormClosed     += (_, _) => { _videoForm = null; };
+
+            // Wire camera
+            if (_videoCapture != null)
+                _videoCapture.FrameCaptured += _videoService!.SendVideoFrame;
+
+            // Thêm tile cho các peer đang trong channel
+            foreach (string m in _videoMembers)
+                if (m != _myUsername) _videoForm.AddPeerTile(m);
+
+            _videoForm.Show(this);
+        }
+
+        // Peer vừa JOIN video channel
+        private void OnGroupVideoJoined(string groupId, string peerName, string peerIp,
+                                        int peerAudio, int peerVideo, int peerTcpPort)
+        {
+            if (groupId != _groupId || peerName == _myUsername) return;
+            if (InvokeRequired)
+            {
+                Invoke(() => OnGroupVideoJoined(groupId, peerName, peerIp, peerAudio, peerVideo, peerTcpPort));
+                return;
+            }
+
+            _videoMembers.Add(peerName);
+            UpdateVideoButton();
+            AppendChat($"[Video] {peerName} đã tham gia video channel", Color.FromArgb(80, 150, 230));
+            _videoForm?.AddPeerTile(peerName);
+
+            if (_videoService != null)
+            {
+                _videoService.AddPeer(peerName, peerIp, peerAudio, peerVideo);
+                _ = GroupChatService.SendVideoReplyAsync(
+                    peerIp, peerTcpPort, _groupId, _myUsername,
+                    _videoService.LocalAudioPort, _videoService.LocalVideoPort);
+            }
+        }
+
+        // Nhận REPLY — peer đang trong channel
+        private void OnGroupVideoReplied(string groupId, string peerName, string peerIp,
+                                         int peerAudio, int peerVideo)
+        {
+            if (groupId != _groupId || peerName == _myUsername) return;
+            if (InvokeRequired)
+            {
+                Invoke(() => OnGroupVideoReplied(groupId, peerName, peerIp, peerAudio, peerVideo));
+                return;
+            }
+
+            _videoMembers.Add(peerName);
+            UpdateVideoButton();
+            AppendChat($"[Video] {peerName} đang trong video channel", Color.FromArgb(80, 150, 230));
+            _videoForm?.AddPeerTile(peerName);
+            _videoService?.AddPeer(peerName, peerIp, peerAudio, peerVideo);
+        }
+
+        // Peer rời video channel
+        private void OnGroupVideoLeft(string groupId, string peerName)
+        {
+            if (groupId != _groupId) return;
+            if (InvokeRequired) { Invoke(() => OnGroupVideoLeft(groupId, peerName)); return; }
+
+            _videoMembers.Remove(peerName);
+            _videoService?.RemovePeer(peerName);
+            _videoForm?.RemovePeerTile(peerName);
+            UpdateVideoButton();
+            AppendChat($"[Video] {peerName} đã rời video channel", Color.FromArgb(200, 100, 100));
+
+            SetStatus(_videoMembers.Count > 0
+                ? $"📹 Video  ({_videoMembers.Count} người)"
+                : $"{_members.Count} thành viên",
+                _videoMembers.Count > 0 ? Color.FromArgb(80, 150, 230) : Color.SeaGreen);
+        }
+
+        private void UpdateVideoButton()
+        {
+            bool inVideo = _videoService != null;
+            btnVideo.Text      = inVideo
+                ? $"🔴 Rời Video  ({_videoMembers.Count})"
+                : "📹 Video";
+            btnVideo.BackColor = inVideo
+                ? Color.FromArgb(150, 40, 40)
+                : Color.FromArgb(40, 70, 120);
+            btnVideo.FlatAppearance.MouseOverBackColor = inVideo
+                ? Color.FromArgb(180, 50, 50)
+                : Color.FromArgb(55, 95, 155);
+        }
+
+        private static VideoCaptureService? TryStartCamera()
+        {
+            try { var s = new VideoCaptureService(); s.Start(); return s; }
+            catch { return null; }
         }
 
         // ── Resolve IP:Port cho tất cả thành viên (trừ mình) ─────────

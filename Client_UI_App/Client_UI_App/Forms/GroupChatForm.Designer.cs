@@ -25,6 +25,8 @@ namespace Client_UI_App.Forms
             btnRefreshMembers = new Button();
             btnRenameGroup  = new Button();
             btnLeaveGroup   = new Button();
+            btnVoice        = new Button();
+            btnVideo        = new Button();
 
             pnlRight    = new Panel();
             rtbChat     = new RichTextBox();
@@ -63,24 +65,24 @@ namespace Client_UI_App.Forms
             // ════════════════════════════════════════════════════════════
             pnlLeft.BackColor = clrBgLeft;
             pnlLeft.Dock      = DockStyle.Left;
-            pnlLeft.Width     = 200;
+            pnlLeft.Width     = 225;
             pnlLeft.Padding   = new Padding(8, 6, 8, 6);
 
             // "ID Nhóm"
             lblGroupIdTitle.Text      = "ID Nhóm";
-            lblGroupIdTitle.Font      = new Font("Segoe UI", 8.5F, FontStyle.Bold);
+            lblGroupIdTitle.Font      = new Font("Segoe UI", 13F, FontStyle.Bold);
             lblGroupIdTitle.ForeColor = clrAccPink;
             lblGroupIdTitle.BackColor = clrBgLeft;
             lblGroupIdTitle.Dock      = DockStyle.Top;
-            lblGroupIdTitle.Height    = 20;
+            lblGroupIdTitle.Height    = 30;
             lblGroupIdTitle.TextAlign = ContentAlignment.MiddleLeft;
 
             // Row: [ID Label] [Copy Button]
             pnlGroupIdRow.BackColor = clrBgLeft;
             pnlGroupIdRow.Dock      = DockStyle.Top;
-            pnlGroupIdRow.Height    = 30;
+            pnlGroupIdRow.Height    = 46;
 
-            lblGroupId.Font      = new Font("Consolas", 12F, FontStyle.Bold);
+            lblGroupId.Font      = new Font("Consolas", 16F, FontStyle.Bold);
             lblGroupId.ForeColor = Color.FromArgb(100, 200, 255);
             lblGroupId.BackColor = clrBgLeft;
             lblGroupId.Dock      = DockStyle.Fill;
@@ -88,9 +90,9 @@ namespace Client_UI_App.Forms
             lblGroupId.Text      = "------";
 
             btnCopyId.Text      = "📋";
-            btnCopyId.Font      = new Font("Segoe UI", 9F);
+            btnCopyId.Font      = new Font("Segoe UI", 13F);
             btnCopyId.Dock      = DockStyle.Right;
-            btnCopyId.Width     = 30;
+            btnCopyId.Width     = 40;
             btnCopyId.BackColor = Color.FromArgb(40, 40, 58);
             btnCopyId.ForeColor = clrTextMain;
             btnCopyId.FlatStyle = FlatStyle.Flat;
@@ -108,24 +110,24 @@ namespace Client_UI_App.Forms
 
             // "Thành viên"
             lblMembersTitle.Text      = "Thành viên";
-            lblMembersTitle.Font      = new Font("Segoe UI", 8.5F, FontStyle.Bold);
+            lblMembersTitle.Font      = new Font("Segoe UI", 13F, FontStyle.Bold);
             lblMembersTitle.ForeColor = clrAccPink;
             lblMembersTitle.BackColor = clrBgLeft;
             lblMembersTitle.Dock      = DockStyle.Top;
-            lblMembersTitle.Height    = 20;
+            lblMembersTitle.Height    = 30;
             lblMembersTitle.TextAlign = ContentAlignment.MiddleLeft;
 
             listBoxMembers.Dock        = DockStyle.Top;
-            listBoxMembers.Height      = 180;
-            listBoxMembers.Font        = new Font("Segoe UI", 9.5F);
+            listBoxMembers.Height      = 240;
+            listBoxMembers.Font        = new Font("Segoe UI", 14F);
             listBoxMembers.BorderStyle = BorderStyle.None;
             listBoxMembers.BackColor   = clrBgList;
             listBoxMembers.ForeColor   = clrTextMain;
 
             btnRefreshMembers.Text      = "⟳ Làm mới";
-            btnRefreshMembers.Font      = new Font("Segoe UI", 8.5F);
+            btnRefreshMembers.Font      = new Font("Segoe UI", 13F);
             btnRefreshMembers.Dock      = DockStyle.Top;
-            btnRefreshMembers.Height    = 26;
+            btnRefreshMembers.Height    = 38;
             btnRefreshMembers.BackColor = Color.FromArgb(40, 40, 58);
             btnRefreshMembers.ForeColor = Color.FromArgb(130, 180, 230);
             btnRefreshMembers.FlatStyle = FlatStyle.Flat;
@@ -140,9 +142,9 @@ namespace Client_UI_App.Forms
             var sep4 = new Label { Height = 6, Dock = DockStyle.Top, BackColor = clrBgLeft };
 
             btnRenameGroup.Text      = "✏️ Đổi tên nhóm";
-            btnRenameGroup.Font      = new Font("Segoe UI", 8.5F);
+            btnRenameGroup.Font      = new Font("Segoe UI", 13F);
             btnRenameGroup.Dock      = DockStyle.Top;
-            btnRenameGroup.Height    = 26;
+            btnRenameGroup.Height    = 38;
             btnRenameGroup.BackColor = Color.FromArgb(60, 80, 120);
             btnRenameGroup.ForeColor = Color.White;
             btnRenameGroup.FlatStyle = FlatStyle.Flat;
@@ -152,9 +154,9 @@ namespace Client_UI_App.Forms
             btnRenameGroup.Click    += btnRenameGroup_Click;
 
             btnLeaveGroup.Text      = "Rời nhóm";
-            btnLeaveGroup.Font      = new Font("Segoe UI", 8.5F);
+            btnLeaveGroup.Font      = new Font("Segoe UI", 13F);
             btnLeaveGroup.Dock      = DockStyle.Top;
-            btnLeaveGroup.Height    = 26;
+            btnLeaveGroup.Height    = 38;
             btnLeaveGroup.BackColor = clrAccRed;
             btnLeaveGroup.ForeColor = Color.White;
             btnLeaveGroup.FlatStyle = FlatStyle.Flat;
@@ -163,8 +165,34 @@ namespace Client_UI_App.Forms
             btnLeaveGroup.Cursor    = Cursors.Hand;
             btnLeaveGroup.Click    += btnLeaveGroup_Click;
 
+            btnVoice.Text      = "🎙️ Voice";
+            btnVoice.Font      = new Font("Segoe UI", 13F);
+            btnVoice.Dock      = DockStyle.Top;
+            btnVoice.Height    = 42;
+            btnVoice.BackColor = Color.FromArgb(40, 100, 60);
+            btnVoice.ForeColor = Color.White;
+            btnVoice.FlatStyle = FlatStyle.Flat;
+            btnVoice.FlatAppearance.BorderSize = 0;
+            btnVoice.FlatAppearance.MouseOverBackColor = Color.FromArgb(50, 130, 80);
+            btnVoice.Cursor    = Cursors.Hand;
+            btnVoice.Click    += btnVoice_Click;
+
+            btnVideo.Text      = "📹 Video";
+            btnVideo.Font      = new Font("Segoe UI", 13F);
+            btnVideo.Dock      = DockStyle.Top;
+            btnVideo.Height    = 42;
+            btnVideo.BackColor = Color.FromArgb(40, 70, 120);
+            btnVideo.ForeColor = Color.White;
+            btnVideo.FlatStyle = FlatStyle.Flat;
+            btnVideo.FlatAppearance.BorderSize = 0;
+            btnVideo.FlatAppearance.MouseOverBackColor = Color.FromArgb(55, 95, 155);
+            btnVideo.Cursor    = Cursors.Hand;
+            btnVideo.Click    += btnVideo_Click;
+
             // Thứ tự Add Dock=Top: LIFO (thêm sau = hiện trên)
             pnlLeft.Controls.Add(btnLeaveGroup);
+            pnlLeft.Controls.Add(btnVoice);
+            pnlLeft.Controls.Add(btnVideo);
             pnlLeft.Controls.Add(sep4);
             pnlLeft.Controls.Add(div2);
             pnlLeft.Controls.Add(sep3);
@@ -182,14 +210,14 @@ namespace Client_UI_App.Forms
             //  Panel dưới — TextBox nhập + Nút Gửi
             // ════════════════════════════════════════════════════════════
             pnlBottom.Dock      = DockStyle.Bottom;
-            pnlBottom.Height    = 50;
+            pnlBottom.Height    = 84;
             pnlBottom.BackColor = clrBgBottom;
-            pnlBottom.Padding   = new Padding(8, 7, 8, 7);
+            pnlBottom.Padding   = new Padding(8, 8, 8, 8);
 
             btnSend.Text      = "Gửi ▶";
-            btnSend.Font      = new Font("Segoe UI", 10F, FontStyle.Bold);
+            btnSend.Font      = new Font("Segoe UI", 14F, FontStyle.Bold);
             btnSend.Dock      = DockStyle.Right;
-            btnSend.Width     = 90;
+            btnSend.Width     = 105;
             btnSend.BackColor = clrAccBlue;
             btnSend.ForeColor = Color.White;
             btnSend.FlatStyle = FlatStyle.Flat;
@@ -199,9 +227,9 @@ namespace Client_UI_App.Forms
             btnSend.Click    += btnSend_Click;
 
             btnSendFile.Text      = "📎 File";
-            btnSendFile.Font      = new Font("Segoe UI", 9F);
+            btnSendFile.Font      = new Font("Segoe UI", 13F);
             btnSendFile.Dock      = DockStyle.Right;
-            btnSendFile.Width     = 72;
+            btnSendFile.Width     = 88;
             btnSendFile.BackColor = Color.FromArgb(50, 50, 70);
             btnSendFile.ForeColor = Color.FromArgb(180, 190, 210);
             btnSendFile.FlatStyle = FlatStyle.Flat;
@@ -211,12 +239,15 @@ namespace Client_UI_App.Forms
             btnSendFile.Cursor    = Cursors.Hand;
             btnSendFile.Click    += btnSendFile_Click;
 
-            txtMessage.Font            = new Font("Segoe UI", 11F);
+            txtMessage.Font            = new Font("Segoe UI", 18F);
             txtMessage.Dock            = DockStyle.Fill;
             txtMessage.BackColor       = clrBgInput;
             txtMessage.ForeColor       = clrTextMain;
             txtMessage.BorderStyle     = BorderStyle.None;
-            txtMessage.PlaceholderText = "Nhập tin nhắn nhóm... (Enter để gửi)";
+            txtMessage.Multiline       = true;
+            txtMessage.AcceptsReturn   = false;
+            txtMessage.ScrollBars      = ScrollBars.None;
+            txtMessage.PlaceholderText = "Nhắn tin tới nhóm...";
             txtMessage.KeyDown        += txtMessage_KeyDown;
 
             pnlBottom.Controls.Add(txtMessage);
@@ -233,7 +264,7 @@ namespace Client_UI_App.Forms
             rtbChat.ReadOnly    = true;
             rtbChat.BackColor   = clrBgRight;
             rtbChat.ForeColor   = clrTextMain;
-            rtbChat.Font        = new Font("Segoe UI", 10F);
+            rtbChat.Font        = new Font("Segoe UI", 16F);
             rtbChat.BorderStyle = BorderStyle.None;
             rtbChat.ScrollBars  = RichTextBoxScrollBars.Vertical;
             rtbChat.DetectUrls  = false;
@@ -246,12 +277,12 @@ namespace Client_UI_App.Forms
             //  Status bar
             // ════════════════════════════════════════════════════════════
             pnlStatus.Dock      = DockStyle.Bottom;
-            pnlStatus.Height    = 26;
+            pnlStatus.Height    = 32;
             pnlStatus.BackColor = clrBgStatus;
             pnlStatus.Padding   = new Padding(10, 4, 10, 0);
 
             lblStatus.Text         = "Đang tải...";
-            lblStatus.Font         = new Font("Segoe UI", 8.5F);
+            lblStatus.Font         = new Font("Segoe UI", 12F);
             lblStatus.ForeColor    = clrTextStatus;
             lblStatus.BackColor    = clrBgStatus;
             lblStatus.Dock         = DockStyle.Fill;
@@ -296,6 +327,8 @@ namespace Client_UI_App.Forms
         private Button      btnRefreshMembers;
         private Button      btnRenameGroup;
         private Button      btnLeaveGroup;
+        private Button      btnVoice;
+        private Button      btnVideo;
 
         private Panel       pnlRight;
         private RichTextBox rtbChat;
