@@ -13,15 +13,10 @@ namespace Client_UI_App.Services
     // Wire protocol: StreamWriter.WriteLine / StreamReader.ReadLine (text, pipe-delimited)
     internal static class DirectoryService
     {
-        // ⚠️ ĐỔI IP NÀY KHI DEMO:
-        //   Local dev  → "127.0.0.1"
-        //   Tailscale  → IP Tailscale của máy chạy server  (vd: "100.x.x.x")
-        //   Azure      → Public IP của Azure VM             (vd: "20.x.x.x")
-        private const string LbIp   = "127.0.0.1";
-        private const int    LbPort = 9000;
-
-        // Danh sách tất cả Directory Server ports — dùng để merge LIST_USERS / group queries
-        private static readonly int[] AllDirPorts = { 8888, 8889 };
+        // ⚠️ Cấu hình đọc từ appsettings.json — đổi IP ở đó, không cần rebuild
+        private static string LbIp        => AppConfig.LbIp;
+        private static int    LbPort      => AppConfig.LbPort;
+        private static int[]  AllDirPorts => AppConfig.DirPorts;
 
         // ── Bước 1: Xin vé từ Load Balancer, nhận Port của Directory Server ──
         public static async Task<int> GetDirectoryPortAsync()
@@ -187,7 +182,8 @@ namespace Client_UI_App.Services
 
         // ── Tham gia nhóm (thử từng server, broadcast cho server còn lại) ──
         // Gửi: JOIN_GROUP|groupId|username
-        public static async Task<(bool success, string groupName, List<string> members)> JoinGroupAsync(
+        // Nhận: GROUP_JOIN_SUCCESS|groupName|creator|members
+        public static async Task<(bool success, string groupName, string creator, List<string> members)> JoinGroupAsync(
             string groupId, string username)
         {
             foreach (int port in AllDirPorts)
@@ -204,25 +200,26 @@ namespace Client_UI_App.Services
 
                     await writer.WriteLineAsync($"JOIN_GROUP|{groupId}|{username}");
                     string response = await reader.ReadLineAsync() ?? "";
-                    string[] parts  = response.Split('|', 3);
+                    string[] parts  = response.Split('|', 4);
 
                     if (parts[0] == "GROUP_JOIN_SUCCESS")
                     {
                         string name    = parts.Length > 1 ? parts[1] : groupId;
-                        var    members = parts.Length > 2 && !string.IsNullOrEmpty(parts[2])
-                            ? parts[2].Split(',').ToList()
+                        string creator = parts.Length > 2 ? parts[2] : "";
+                        var    members = parts.Length > 3 && !string.IsNullOrEmpty(parts[3])
+                            ? parts[3].Split(',').ToList()
                             : new List<string>();
 
                         // Broadcast JOIN tới server còn lại (fire-and-forget)
                         int otherPort = AllDirPorts.First(p => p != port);
                         _ = SendGroupCommandAsync(otherPort, $"JOIN_GROUP|{groupId}|{username}");
 
-                        return (true, name, members);
+                        return (true, name, creator, members);
                     }
                 }
                 catch { /* Thử server tiếp theo */ }
             }
-            return (false, "", new List<string>());
+            return (false, "", "", new List<string>());
         }
 
         // ── Rời nhóm (broadcast cả 2 server) ──
