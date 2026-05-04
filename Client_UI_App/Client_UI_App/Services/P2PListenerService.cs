@@ -37,7 +37,20 @@ namespace Client_UI_App.Services
         // Sự kiện file nhóm: (groupId, groupName, sender, fileName, localSavePath)
         public static event Action<string, string, string, string, string>? GroupFileReceived;
 
-        // Voice signaling: (callerName, callerUdpPort)
+        // Sự kiện đổi tên nhóm real-time: (groupId, newName)
+        public static event Action<string, string>? GroupRenamed;
+
+        // Typing indicator: (senderName)
+        public static event Action<string>?         TypingReceived;
+
+        // Group voice channel: (groupId, username, senderIp, udpPort, senderTcpPort)
+        public static event Action<string, string, string, int, int>? GroupVoiceJoined;
+        // Group voice reply: (groupId, username, senderIp, udpPort)
+        public static event Action<string, string, string, int>?      GroupVoiceReplied;
+        // Group voice leave: (groupId, username)
+        public static event Action<string, string>?                   GroupVoiceLeft;
+
+        // Voice signaling 1:1: (callerName, callerUdpPort)
         public static event Action<string, string>? IncomingVoiceCall;
         // Voice signaling: (peerName, answererUdpPort)
         public static event Action<string, string>? VoiceCallAnswered;
@@ -45,6 +58,22 @@ namespace Client_UI_App.Services
         public static event Action<string>?         VoiceCallRejected;
         // Voice signaling: (peerName)
         public static event Action<string>?         VoiceCallHungUp;
+
+        // Video signaling 1:1: (callerName, callerAudioPort, callerVideoPort)
+        public static event Action<string, string, string>? IncomingVideoCall;
+        // Video signaling: (peerName, answererAudioPort, answererVideoPort)
+        public static event Action<string, string, string>? VideoCallAnswered;
+        // Video signaling: (peerName)
+        public static event Action<string>?                 VideoCallRejected;
+        // Video signaling: (peerName)
+        public static event Action<string>?                 VideoCallHungUp;
+
+        // Group video channel: (groupId, username, senderIp, audioUdpPort, videoUdpPort, senderTcpPort)
+        public static event Action<string, string, string, int, int, int>? GroupVideoJoined;
+        // Group video reply:   (groupId, username, senderIp, audioUdpPort, videoUdpPort)
+        public static event Action<string, string, string, int, int>?      GroupVideoReplied;
+        // Group video leave:   (groupId, username)
+        public static event Action<string, string>?                        GroupVideoLeft;
 
         // Khởi động listener trên port ngẫu nhiên (OS chọn)
         public static int Start(string username)
@@ -82,6 +111,10 @@ namespace Client_UI_App.Services
         {
             try
             {
+                // Lấy IP nguồn — dùng cho group voice để biết peer ở đâu
+                string remoteIp = ((System.Net.IPEndPoint?)client.Client.RemoteEndPoint)
+                                  ?.Address.ToString() ?? "127.0.0.1";
+
                 await using NetworkStream stream = client.GetStream();
                 using StreamReader  reader = new(stream, Encoding.UTF8, leaveOpen: true);
                 await using StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
@@ -112,9 +145,45 @@ namespace Client_UI_App.Services
                     if (parts.Length == 5)
                         GroupMessageReceived?.Invoke(parts[1], parts[2], parts[3], parts[4]);
                 }
+                else if (firstLine.StartsWith("GROUP_RENAME|"))
+                {
+                    // GROUP_RENAME|groupId|newName
+                    string[] parts = firstLine.Split('|', 3);
+                    if (parts.Length == 3)
+                        GroupRenamed?.Invoke(parts[1], parts[2]);
+                }
                 else if (firstLine.StartsWith("GROUP_FILE_INIT|"))
                 {
                     await HandleGroupFileTransferAsync(firstLine, reader);
+                }
+                else if (firstLine.StartsWith("TYPING|"))
+                {
+                    string[] parts = firstLine.Split('|', 2);
+                    if (parts.Length == 2)
+                        TypingReceived?.Invoke(parts[1]);
+                }
+                else if (firstLine.StartsWith("GROUP_VOICE_JOIN|"))
+                {
+                    // GROUP_VOICE_JOIN|groupId|username|udpPort|senderTcpPort
+                    string[] parts = firstLine.Split('|', 5);
+                    if (parts.Length == 5
+                        && int.TryParse(parts[3], out int udpPort)
+                        && int.TryParse(parts[4], out int tcpPort))
+                        GroupVoiceJoined?.Invoke(parts[1], parts[2], remoteIp, udpPort, tcpPort);
+                }
+                else if (firstLine.StartsWith("GROUP_VOICE_REPLY|"))
+                {
+                    // GROUP_VOICE_REPLY|groupId|username|udpPort
+                    string[] parts = firstLine.Split('|', 4);
+                    if (parts.Length == 4 && int.TryParse(parts[3], out int udpPort))
+                        GroupVoiceReplied?.Invoke(parts[1], parts[2], remoteIp, udpPort);
+                }
+                else if (firstLine.StartsWith("GROUP_VOICE_LEAVE|"))
+                {
+                    // GROUP_VOICE_LEAVE|groupId|username
+                    string[] parts = firstLine.Split('|', 3);
+                    if (parts.Length == 3)
+                        GroupVoiceLeft?.Invoke(parts[1], parts[2]);
                 }
                 else if (firstLine.StartsWith("VOICE_OFFER|"))
                 {
@@ -139,6 +208,58 @@ namespace Client_UI_App.Services
                     string[] parts = firstLine.Split('|', 2);
                     if (parts.Length == 2)
                         VoiceCallHungUp?.Invoke(parts[1]);
+                }
+                else if (firstLine.StartsWith("VIDEO_OFFER|"))
+                {
+                    // VIDEO_OFFER|callerName|audioUdpPort|videoUdpPort
+                    string[] parts = firstLine.Split('|', 4);
+                    if (parts.Length == 4)
+                        IncomingVideoCall?.Invoke(parts[1], parts[2], parts[3]);
+                }
+                else if (firstLine.StartsWith("VIDEO_ANSWER|"))
+                {
+                    // VIDEO_ANSWER|callerName|audioUdpPort|videoUdpPort
+                    string[] parts = firstLine.Split('|', 4);
+                    if (parts.Length == 4)
+                        VideoCallAnswered?.Invoke(parts[1], parts[2], parts[3]);
+                }
+                else if (firstLine.StartsWith("VIDEO_REJECT|"))
+                {
+                    string[] parts = firstLine.Split('|', 2);
+                    if (parts.Length == 2)
+                        VideoCallRejected?.Invoke(parts[1]);
+                }
+                else if (firstLine.StartsWith("VIDEO_HANGUP|"))
+                {
+                    string[] parts = firstLine.Split('|', 2);
+                    if (parts.Length == 2)
+                        VideoCallHungUp?.Invoke(parts[1]);
+                }
+                else if (firstLine.StartsWith("GROUP_VIDEO_JOIN|"))
+                {
+                    // GROUP_VIDEO_JOIN|groupId|username|audioPort|videoPort|senderTcpPort
+                    string[] parts = firstLine.Split('|', 6);
+                    if (parts.Length == 6
+                        && int.TryParse(parts[3], out int aPort)
+                        && int.TryParse(parts[4], out int vPort)
+                        && int.TryParse(parts[5], out int tcpPort))
+                        GroupVideoJoined?.Invoke(parts[1], parts[2], remoteIp, aPort, vPort, tcpPort);
+                }
+                else if (firstLine.StartsWith("GROUP_VIDEO_REPLY|"))
+                {
+                    // GROUP_VIDEO_REPLY|groupId|username|audioPort|videoPort
+                    string[] parts = firstLine.Split('|', 5);
+                    if (parts.Length == 5
+                        && int.TryParse(parts[3], out int aPort)
+                        && int.TryParse(parts[4], out int vPort))
+                        GroupVideoReplied?.Invoke(parts[1], parts[2], remoteIp, aPort, vPort);
+                }
+                else if (firstLine.StartsWith("GROUP_VIDEO_LEAVE|"))
+                {
+                    // GROUP_VIDEO_LEAVE|groupId|username
+                    string[] parts = firstLine.Split('|', 3);
+                    if (parts.Length == 3)
+                        GroupVideoLeft?.Invoke(parts[1], parts[2]);
                 }
             }
             catch { /* Bỏ qua lỗi đọc */ }
