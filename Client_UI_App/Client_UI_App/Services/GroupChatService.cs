@@ -84,6 +84,70 @@ namespace Client_UI_App.Services
             }
         }
 
+        // ── Broadcast tham gia voice channel ─────────────────────────
+        // Gửi GROUP_VOICE_JOIN tới tất cả thành viên để họ biết UDP port của mình
+        public static Task BroadcastVoiceJoinAsync(
+            string groupId, string username, int udpPort, int myTcpPort,
+            IEnumerable<(string ip, int port)> memberEndpoints)
+        {
+            string line = $"GROUP_VOICE_JOIN|{groupId}|{username}|{udpPort}|{myTcpPort}";
+            return Task.WhenAll(memberEndpoints.Select(ep => SendLineAsync(ep.ip, ep.port, line)));
+        }
+
+        // Gửi GROUP_VOICE_REPLY trực tiếp về người vừa join (1 peer, không broadcast)
+        public static Task SendVoiceReplyAsync(
+            string peerIp, int peerTcpPort, string groupId, string username, int myUdpPort)
+        {
+            return SendLineAsync(peerIp, peerTcpPort, $"GROUP_VOICE_REPLY|{groupId}|{username}|{myUdpPort}");
+        }
+
+        // Broadcast rời voice channel
+        public static Task BroadcastVoiceLeaveAsync(
+            string groupId, string username,
+            IEnumerable<(string ip, int port)> memberEndpoints)
+        {
+            string line = $"GROUP_VOICE_LEAVE|{groupId}|{username}";
+            return Task.WhenAll(memberEndpoints.Select(ep => SendLineAsync(ep.ip, ep.port, line)));
+        }
+
+        // ── Group Video channel ───────────────────────────────────────────
+        // Broadcast tham gia video channel (audio+video ports)
+        public static Task BroadcastVideoJoinAsync(
+            string groupId, string username,
+            int audioPort, int videoPort, int myTcpPort,
+            IEnumerable<(string ip, int port)> memberEndpoints)
+        {
+            string line = $"GROUP_VIDEO_JOIN|{groupId}|{username}|{audioPort}|{videoPort}|{myTcpPort}";
+            return Task.WhenAll(memberEndpoints.Select(ep => SendLineAsync(ep.ip, ep.port, line)));
+        }
+
+        // Reply trực tiếp về người vừa join
+        public static Task SendVideoReplyAsync(
+            string peerIp, int peerTcpPort, string groupId, string username,
+            int audioPort, int videoPort)
+        {
+            return SendLineAsync(peerIp, peerTcpPort,
+                $"GROUP_VIDEO_REPLY|{groupId}|{username}|{audioPort}|{videoPort}");
+        }
+
+        // Broadcast rời video channel
+        public static Task BroadcastVideoLeaveAsync(
+            string groupId, string username,
+            IEnumerable<(string ip, int port)> memberEndpoints)
+        {
+            string line = $"GROUP_VIDEO_LEAVE|{groupId}|{username}";
+            return Task.WhenAll(memberEndpoints.Select(ep => SendLineAsync(ep.ip, ep.port, line)));
+        }
+
+        // Broadcast đổi tên nhóm tới tất cả thành viên online
+        public static Task BroadcastRenameAsync(
+            string groupId, string newName, IEnumerable<(string ip, int port)> memberEndpoints)
+        {
+            var tasks = memberEndpoints.Select(ep =>
+                SendLineAsync(ep.ip, ep.port, $"GROUP_RENAME|{groupId}|{newName}"));
+            return Task.WhenAll(tasks);
+        }
+
         // Helper: gửi 1 dòng text tới peer, đóng kết nối
         private static async Task SendLineAsync(string ip, int port, string line)
         {
