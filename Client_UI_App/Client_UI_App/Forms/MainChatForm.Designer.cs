@@ -30,6 +30,7 @@ namespace Client_UI_App.Forms
             picPeerAvatar   = new PictureBox();
             lblPeerInfo     = new Label();
             btnCall         = new Button();
+            btnVideoCall    = new Button();
 
             // User profile bar (bottom of sidebar)
             pnlUserProfile  = new Panel();
@@ -76,32 +77,35 @@ namespace Client_UI_App.Forms
             // ════════════════════════════════════════════════════════════
             pnlLeft.BackColor = clrBgLeft;
             pnlLeft.Dock      = DockStyle.Left;
-            pnlLeft.Width     = 240;
+            pnlLeft.Width     = 265;
             pnlLeft.Padding   = new Padding(0);
 
             // ── Tiêu đề "Người dùng Online" ───────────────────────────
             lblOnlineTitle.Text      = "  Người dùng Online";
-            lblOnlineTitle.Font      = new Font("Segoe UI", 8.5F, FontStyle.Bold);
+            lblOnlineTitle.Font      = new Font("Segoe UI", 13F, FontStyle.Bold);
             lblOnlineTitle.ForeColor = clrAccPink;
             lblOnlineTitle.BackColor = clrBgLeft;
             lblOnlineTitle.Dock      = DockStyle.Top;
-            lblOnlineTitle.Height    = 24;
+            lblOnlineTitle.Height    = 34;
             lblOnlineTitle.TextAlign = ContentAlignment.MiddleLeft;
 
             listBoxUsers.Dock                  = DockStyle.Top;
-            listBoxUsers.Height                = 110;
-            listBoxUsers.Font                  = new Font("Segoe UI", 9.5F);
+            listBoxUsers.Height                = 150;
+            listBoxUsers.Font                  = new Font("Segoe UI", 14F);
             listBoxUsers.BorderStyle           = BorderStyle.None;
             listBoxUsers.SelectionMode         = SelectionMode.One;
             listBoxUsers.BackColor             = clrBgList;
             listBoxUsers.ForeColor             = clrTextMain;
             listBoxUsers.Padding               = new Padding(4, 0, 0, 0);
+            listBoxUsers.DrawMode              = DrawMode.OwnerDrawFixed;
+            listBoxUsers.ItemHeight            = 32;
             listBoxUsers.SelectedIndexChanged += listBoxUsers_SelectedIndexChanged;
+            listBoxUsers.DrawItem             += listBoxUsers_DrawItem;
 
             btnRefreshUsers.Text      = "⟳  Làm mới";
-            btnRefreshUsers.Font      = new Font("Segoe UI", 8.5F);
+            btnRefreshUsers.Font      = new Font("Segoe UI", 13F);
             btnRefreshUsers.Dock      = DockStyle.Top;
-            btnRefreshUsers.Height    = 26;
+            btnRefreshUsers.Height    = 38;
             btnRefreshUsers.BackColor = Color.FromArgb(40, 40, 58);
             btnRefreshUsers.ForeColor = Color.FromArgb(130, 180, 230);
             btnRefreshUsers.FlatStyle = FlatStyle.Flat;
@@ -117,16 +121,16 @@ namespace Client_UI_App.Forms
 
             // ── Tiêu đề "Nhóm của tôi" ────────────────────────────────
             lblGroupsTitle.Text      = "  Nhóm của tôi";
-            lblGroupsTitle.Font      = new Font("Segoe UI", 8.5F, FontStyle.Bold);
+            lblGroupsTitle.Font      = new Font("Segoe UI", 13F, FontStyle.Bold);
             lblGroupsTitle.ForeColor = clrAccPink;
             lblGroupsTitle.BackColor = clrBgLeft;
             lblGroupsTitle.Dock      = DockStyle.Top;
-            lblGroupsTitle.Height    = 24;
+            lblGroupsTitle.Height    = 34;
             lblGroupsTitle.TextAlign = ContentAlignment.MiddleLeft;
 
             listBoxGroups.Dock                  = DockStyle.Top;
-            listBoxGroups.Height                = 100;
-            listBoxGroups.Font                  = new Font("Segoe UI", 9F);
+            listBoxGroups.Height                = 140;
+            listBoxGroups.Font                  = new Font("Segoe UI", 14F);
             listBoxGroups.BorderStyle           = BorderStyle.None;
             listBoxGroups.SelectionMode         = SelectionMode.One;
             listBoxGroups.BackColor             = clrBgList;
@@ -136,11 +140,11 @@ namespace Client_UI_App.Forms
 
             // Hàng nút nhóm: [+ Tạo] [→ Tham gia]
             pnlGroupButtons.Dock      = DockStyle.Top;
-            pnlGroupButtons.Height    = 28;
+            pnlGroupButtons.Height    = 42;
             pnlGroupButtons.BackColor = clrBgLeft;
 
             btnCreateGroup.Text      = "+ Tạo";
-            btnCreateGroup.Font      = new Font("Segoe UI", 8.5F);
+            btnCreateGroup.Font      = new Font("Segoe UI", 13F);
             btnCreateGroup.Dock      = DockStyle.Left;
             btnCreateGroup.Width     = 108;
             btnCreateGroup.BackColor = clrAccGreen;
@@ -152,7 +156,7 @@ namespace Client_UI_App.Forms
             btnCreateGroup.Click    += btnCreateGroup_Click;
 
             btnJoinGroup.Text      = "→ Tham gia";
-            btnJoinGroup.Font      = new Font("Segoe UI", 8.5F);
+            btnJoinGroup.Font      = new Font("Segoe UI", 13F);
             btnJoinGroup.Dock      = DockStyle.Fill;
             btnJoinGroup.BackColor = Color.FromArgb(50, 80, 130);
             btnJoinGroup.ForeColor = Color.White;
@@ -171,7 +175,7 @@ namespace Client_UI_App.Forms
 
             // ── Peer info panel (avatar + tên peer + nút gọi) ─────────
             pnlPeerInfo.Dock      = DockStyle.Top;
-            pnlPeerInfo.Height    = 52;
+            pnlPeerInfo.Height    = 68;
             pnlPeerInfo.BackColor = clrBgLeft;
             pnlPeerInfo.Padding   = new Padding(0);
 
@@ -188,7 +192,7 @@ namespace Client_UI_App.Forms
             pnlPeerAvatarWrap.Controls.Add(picPeerAvatar);
 
             lblPeerInfo.Text      = "Chọn user để bắt đầu chat";
-            lblPeerInfo.Font      = new Font("Segoe UI", 8.5F, FontStyle.Italic);
+            lblPeerInfo.Font      = new Font("Segoe UI", 13F, FontStyle.Italic);
             lblPeerInfo.ForeColor = clrTextHint;
             lblPeerInfo.BackColor = clrBgLeft;
             lblPeerInfo.Dock      = DockStyle.Fill;
@@ -196,9 +200,9 @@ namespace Client_UI_App.Forms
             lblPeerInfo.Padding   = new Padding(4, 0, 4, 0);
 
             btnCall.Text      = "📞";
-            btnCall.Font      = new Font("Segoe UI", 12F);
+            btnCall.Font      = new Font("Segoe UI", 16F);
             btnCall.Dock      = DockStyle.Right;
-            btnCall.Width     = 46;
+            btnCall.Width     = 56;
             btnCall.BackColor = Color.FromArgb(0, 140, 90);
             btnCall.ForeColor = Color.White;
             btnCall.FlatStyle = FlatStyle.Flat;
@@ -208,8 +212,22 @@ namespace Client_UI_App.Forms
             btnCall.Visible   = false;
             btnCall.Click    += btnCall_Click;
 
-            // LIFO: Fill được thêm đầu tiên, Right/Left thêm sau
+            btnVideoCall.Text      = "📹";
+            btnVideoCall.Font      = new Font("Segoe UI", 16F);
+            btnVideoCall.Dock      = DockStyle.Right;
+            btnVideoCall.Width     = 56;
+            btnVideoCall.BackColor = Color.FromArgb(0, 80, 160);
+            btnVideoCall.ForeColor = Color.White;
+            btnVideoCall.FlatStyle = FlatStyle.Flat;
+            btnVideoCall.FlatAppearance.BorderSize         = 0;
+            btnVideoCall.FlatAppearance.MouseOverBackColor = Color.FromArgb(0, 100, 190);
+            btnVideoCall.Cursor    = Cursors.Hand;
+            btnVideoCall.Visible   = false;
+            btnVideoCall.Click    += btnVideoCall_Click;
+
+            // LIFO: Fill đầu tiên; Right docked theo thứ tự: btnVideoCall (trái) → btnCall (phải)
             pnlPeerInfo.Controls.Add(lblPeerInfo);
+            pnlPeerInfo.Controls.Add(btnVideoCall);
             pnlPeerInfo.Controls.Add(btnCall);
             pnlPeerInfo.Controls.Add(pnlPeerAvatarWrap);
 
@@ -222,7 +240,7 @@ namespace Client_UI_App.Forms
             };
 
             pnlUserProfile.Dock      = DockStyle.Top;
-            pnlUserProfile.Height    = 58;
+            pnlUserProfile.Height    = 74;
             pnlUserProfile.BackColor = clrUserProfile;
             pnlUserProfile.Padding   = new Padding(0);
 
@@ -244,7 +262,7 @@ namespace Client_UI_App.Forms
             pnlMyAvatarWrap.Controls.Add(picMyAvatar);
 
             lblMyUsername.Text      = "...";
-            lblMyUsername.Font      = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+            lblMyUsername.Font      = new Font("Segoe UI", 14F, FontStyle.Bold);
             lblMyUsername.ForeColor = clrTextMain;
             lblMyUsername.BackColor = clrUserProfile;
             lblMyUsername.Dock      = DockStyle.Fill;
@@ -275,14 +293,14 @@ namespace Client_UI_App.Forms
             //  Panel dưới — TextBox nhập + Nút Gửi
             // ════════════════════════════════════════════════════════════
             pnlBottom.Dock      = DockStyle.Bottom;
-            pnlBottom.Height    = 50;
+            pnlBottom.Height    = 84;
             pnlBottom.BackColor = clrBgBottom;
-            pnlBottom.Padding   = new Padding(8, 7, 8, 7);
+            pnlBottom.Padding   = new Padding(8, 8, 8, 8);
 
             btnSend.Text      = "Gửi ▶";
-            btnSend.Font      = new Font("Segoe UI", 10F, FontStyle.Bold);
+            btnSend.Font      = new Font("Segoe UI", 14F, FontStyle.Bold);
             btnSend.Dock      = DockStyle.Right;
-            btnSend.Width     = 90;
+            btnSend.Width     = 105;
             btnSend.BackColor = clrAccBlue;
             btnSend.ForeColor = Color.White;
             btnSend.FlatStyle = FlatStyle.Flat;
@@ -292,9 +310,9 @@ namespace Client_UI_App.Forms
             btnSend.Click    += btnSend_Click;
 
             btnSendFile.Text      = "📎 File";
-            btnSendFile.Font      = new Font("Segoe UI", 9F);
+            btnSendFile.Font      = new Font("Segoe UI", 13F);
             btnSendFile.Dock      = DockStyle.Right;
-            btnSendFile.Width     = 72;
+            btnSendFile.Width     = 88;
             btnSendFile.BackColor = Color.FromArgb(50, 50, 70);
             btnSendFile.ForeColor = Color.FromArgb(180, 190, 210);
             btnSendFile.FlatStyle = FlatStyle.Flat;
@@ -304,13 +322,17 @@ namespace Client_UI_App.Forms
             btnSendFile.Cursor    = Cursors.Hand;
             btnSendFile.Click    += btnSendFile_Click;
 
-            txtMessage.Font            = new Font("Segoe UI", 11F);
+            txtMessage.Font            = new Font("Segoe UI", 18F);
             txtMessage.Dock            = DockStyle.Fill;
             txtMessage.BackColor       = clrBgInput;
             txtMessage.ForeColor       = clrTextMain;
             txtMessage.BorderStyle     = BorderStyle.None;
-            txtMessage.PlaceholderText = "Nhập tin nhắn... (Enter để gửi)";
+            txtMessage.Multiline       = true;
+            txtMessage.AcceptsReturn   = false;
+            txtMessage.ScrollBars      = ScrollBars.None;
+            txtMessage.PlaceholderText = "Nhắn tin...";
             txtMessage.KeyDown        += txtMessage_KeyDown;
+            txtMessage.TextChanged    += txtMessage_TextChanged;
 
             pnlBottom.Controls.Add(txtMessage);
             pnlBottom.Controls.Add(btnSendFile);
@@ -326,7 +348,7 @@ namespace Client_UI_App.Forms
             rtbChat.ReadOnly    = true;
             rtbChat.BackColor   = clrBgRight;
             rtbChat.ForeColor   = clrTextMain;
-            rtbChat.Font        = new Font("Segoe UI", 10F);
+            rtbChat.Font        = new Font("Segoe UI", 16F);
             rtbChat.BorderStyle = BorderStyle.None;
             rtbChat.ScrollBars  = RichTextBoxScrollBars.Vertical;
             rtbChat.DetectUrls  = false;
@@ -339,12 +361,12 @@ namespace Client_UI_App.Forms
             //  Status bar
             // ════════════════════════════════════════════════════════════
             pnlStatus.Dock      = DockStyle.Bottom;
-            pnlStatus.Height    = 26;
+            pnlStatus.Height    = 32;
             pnlStatus.BackColor = clrBgStatus;
             pnlStatus.Padding   = new Padding(10, 4, 10, 0);
 
             lblStatus.Text         = "Chờ kết nối P2P...";
-            lblStatus.Font         = new Font("Segoe UI", 8.5F);
+            lblStatus.Font         = new Font("Segoe UI", 12F);
             lblStatus.ForeColor    = clrTextStatus;
             lblStatus.BackColor    = clrBgStatus;
             lblStatus.Dock         = DockStyle.Fill;
@@ -395,6 +417,7 @@ namespace Client_UI_App.Forms
         private PictureBox  picPeerAvatar;
         private Label       lblPeerInfo;
         private Button      btnCall;
+        private Button      btnVideoCall;
 
         private Panel       pnlUserProfile;
         private PictureBox  picMyAvatar;

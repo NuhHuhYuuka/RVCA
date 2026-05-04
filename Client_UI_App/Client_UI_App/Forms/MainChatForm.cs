@@ -41,12 +41,24 @@ namespace Client_UI_App.Forms
         private static readonly int _clrFile      = Color.FromArgb(255, 180, 50).ToArgb();
         private static readonly int _clrCrimson   = Color.Crimson.ToArgb();
 
+        // ── Typing indicator ─────────────────────────────────────────
+        private DateTime _lastTypingSent = DateTime.MinValue;
+        private System.Threading.Timer? _peerTypingClearTimer;
+
         // ── Voice call ────────────────────────────────────────────────
         private VoiceCallService? _activecall;
         private VoiceCallForm?    _callForm;
         private string _callPeer    = "";
         private string _callPeerIp  = "";
         private int    _callPeerPort = 0;
+
+        // ── Video call ────────────────────────────────────────────────
+        private VideoCallService?    _activeVideoCall;
+        private VideoCallForm?       _videoCallForm;
+        private VideoCaptureService? _videoCaptureService;
+        private string _videoCallPeer    = "";
+        private string _videoCallPeerIp  = "";
+        private int    _videoCallPeerPort = 0;
 
         // Bot voice call — giữ TCP connection mở để nhận VOICE_CAPTION
         private System.Net.Sockets.TcpClient? _botCallTcp    = null;
@@ -74,11 +86,18 @@ namespace Client_UI_App.Forms
             P2PListenerService.MessageReceived += OnIncomingMessage;
             P2PListenerService.FileReceived    += OnIncomingFile;
 
-            // Voice signaling events
+            // Typing + voice signaling events
+            P2PListenerService.TypingReceived    += OnPeerTyping;
             P2PListenerService.IncomingVoiceCall += OnIncomingVoiceCall;
             P2PListenerService.VoiceCallAnswered += OnVoiceCallAnswered;
             P2PListenerService.VoiceCallRejected += OnVoiceCallRejected;
             P2PListenerService.VoiceCallHungUp   += OnVoiceCallHungUp;
+
+            // Video call signaling events
+            P2PListenerService.IncomingVideoCall += OnIncomingVideoCall;
+            P2PListenerService.VideoCallAnswered += OnVideoCallAnswered;
+            P2PListenerService.VideoCallRejected += OnVideoCallRejected;
+            P2PListenerService.VideoCallHungUp   += OnVideoCallHungUp;
         }
 
         private async void MainChatForm_Load(object sender, EventArgs e)
@@ -95,6 +114,18 @@ namespace Client_UI_App.Forms
 
             txtMessage.Focus();
             await LoadMyGroupsAsync();
+
+            // Khám phá external IP qua STUN (fire-and-forget, không chặn load)
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var (ip, port) = await StunService.GetExternalEndpointAsync();
+                    this.Invoke(() =>
+                        this.Text = $"Uiti-chan Chat  –  {_username}  (LAN:{P2PListenerService.ListeningPort}  WAN:{ip}:{port})");
+                }
+                catch { /* Không có internet hoặc STUN bị block — bỏ qua */ }
+            });
         }
 
         private void OnFirstShown(object? sender, EventArgs e)
@@ -207,6 +238,7 @@ namespace Client_UI_App.Forms
                 _unreadCounts.TryGetValue(peer, out int n);
                 _unreadCounts[peer] = n + 1;
                 UpdateUserListItem(peer);
+                try { System.Media.SystemSounds.Asterisk.Play(); } catch { }
             }
         }
 
@@ -268,14 +300,45 @@ namespace Client_UI_App.Forms
             rtbChat.ResumeLayout();
         }
 
-        // Cập nhật text hiển thị trong listbox (thêm/xóa badge chưa đọc)
+        // Cập nhật badge chưa đọc — với OwnerDraw chỉ cần invalidate để redraw
         private void UpdateUserListItem(string username)
         {
             if (InvokeRequired) { Invoke(() => UpdateUserListItem(username)); return; }
             int idx = _userList.IndexOf(username);
             if (idx < 0) return;
-            int unread = _unreadCounts.TryGetValue(username, out int n) ? n : 0;
-            listBoxUsers.Items[idx] = unread > 0 ? $"● {username}  ({unread})" : username;
+            var rect = listBoxUsers.GetItemRectangle(idx);
+            listBoxUsers.Invalidate(rect);
+        }
+
+        // OwnerDraw: vẽ chấm xanh status + tên user + badge chưa đọc
+        private void listBoxUsers_DrawItem(object? sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0 || e.Index >= _userList.Count) return;
+
+            e.DrawBackground();
+
+            string username = _userList[e.Index];
+            _unreadCounts.TryGetValue(username, out int unread);
+
+            var g = e.Graphics;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+            // Chấm xanh — tất cả user trong list đều online
+            const int dotSize = 9;
+            int dotX = e.Bounds.X + 10;
+            int dotY = e.Bounds.Y + (e.Bounds.Height - dotSize) / 2;
+            using var dotBrush = new SolidBrush(Color.FromArgb(0, 200, 100));
+            g.FillEllipse(dotBrush, dotX, dotY, dotSize, dotSize);
+
+            // Tên user
+            string displayText = unread > 0 ? $"{username}  ({unread})" : username;
+            var textColor = unread > 0 ? Color.White : e.ForeColor;
+            using var textBrush = new SolidBrush(textColor);
+            var textRect = new Rectangle(e.Bounds.X + 26, e.Bounds.Y, e.Bounds.Width - 26, e.Bounds.Height);
+            using var sf = new StringFormat { LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
+            g.DrawString(displayText, e.Font!, textBrush, textRect, sf);
+
+            e.DrawFocusRectangle();
         }
 
         // ══════════════════════════════════════════════════════════════
@@ -286,8 +349,47 @@ namespace Client_UI_App.Forms
             => AddMessage(sender, $"{sender}: {message}", Color.FromArgb(30, 180, 100));
 
         private void OnIncomingFile(string sender, string fileName, string savePath)
-            => AddMessage(sender, $"📁  {sender} gửi \"{fileName}\"  →  {savePath}",
-                          Color.FromArgb(255, 180, 50));
+        {
+            AddMessage(sender, $"📁  {sender} gửi \"{fileName}\"  →  {savePath}",
+                       Color.FromArgb(255, 180, 50));
+            if (sender == _currentChatPeer && IsImageFile(fileName))
+            {
+                if (InvokeRequired) Invoke(() => AppendImageToRtb(savePath));
+                else AppendImageToRtb(savePath);
+            }
+        }
+
+        private static bool IsImageFile(string name)
+        {
+            string ext = Path.GetExtension(name).ToLowerInvariant();
+            return ext is ".png" or ".jpg" or ".jpeg" or ".gif" or ".bmp" or ".webp";
+        }
+
+        private void AppendImageToRtb(string imagePath)
+        {
+            try
+            {
+                using var orig = Image.FromFile(imagePath);
+                int w = Math.Min(orig.Width, 220);
+                int h = orig.Width > 0 ? (int)(orig.Height * ((double)w / orig.Width)) : 120;
+                using var thumb = new Bitmap(w, h);
+                using (var g = Graphics.FromImage(thumb))
+                {
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(orig, 0, 0, w, h);
+                }
+                bool wasReadOnly = rtbChat.ReadOnly;
+                rtbChat.ReadOnly = false;
+                rtbChat.SelectionStart = rtbChat.TextLength;
+                Clipboard.SetImage(thumb);
+                rtbChat.Paste();
+                rtbChat.AppendText("\n");
+                rtbChat.ReadOnly = wasReadOnly;
+                Clipboard.Clear();
+                rtbChat.ScrollToCaret();
+            }
+            catch { }
+        }
 
         // ══════════════════════════════════════════════════════════════
         //  USER LIST — chọn + làm mới
@@ -365,7 +467,8 @@ namespace Client_UI_App.Forms
                 SetStatus($"Sẵn sàng chat với {selected}", Color.SeaGreen);
 
                 // Nút gọi hiện với cả bot và client
-                btnCall.Visible = true;
+                btnCall.Visible      = true;
+                btnVideoCall.Visible = !_isBotPeer; // video call chỉ cho người thật
 
                 txtMessage.Focus();
             }
@@ -388,8 +491,7 @@ namespace Client_UI_App.Forms
                 foreach (string u in users)
                 {
                     _userList.Add(u);
-                    int unread = _unreadCounts.TryGetValue(u, out int n) ? n : 0;
-                    listBoxUsers.Items.Add(unread > 0 ? $"● {u}  ({unread})" : u);
+                    listBoxUsers.Items.Add(u);   // OwnerDraw tự vẽ badge
                 }
 
                 SetStatus($"{users.Count} user online  ({DateTime.Now:HH:mm:ss})", Color.SeaGreen);
@@ -451,7 +553,7 @@ namespace Client_UI_App.Forms
 
             try
             {
-                var (success, groupName, members) = await DirectoryService.JoinGroupAsync(groupId, _username);
+                var (success, groupName, creator, members) = await DirectoryService.JoinGroupAsync(groupId, _username);
 
                 if (!success)
                 {
@@ -463,12 +565,12 @@ namespace Client_UI_App.Forms
 
                 if (!_myGroups.Exists(g => g.Id == groupId))
                 {
-                    _myGroups.Add((groupId, groupName, ""));
+                    _myGroups.Add((groupId, groupName, creator));
                     listBoxGroups.Items.Add($"{groupName}  [{groupId}]");
                 }
 
                 SetStatus($"Đã tham gia nhóm \"{groupName}\" ({members.Count} thành viên)", Color.SeaGreen);
-                OpenGroupChat(groupId, groupName, "");
+                OpenGroupChat(groupId, groupName, creator);
             }
             catch (Exception ex)
             {
@@ -614,6 +716,38 @@ namespace Client_UI_App.Forms
                 e.SuppressKeyPress = true;
                 btnSend.PerformClick();
             }
+        }
+
+        private void txtMessage_TextChanged(object? sender, EventArgs e)
+        {
+            if (!_p2pReady || _isBotPeer || string.IsNullOrEmpty(_peerIp)) return;
+            var now = DateTime.UtcNow;
+            if ((now - _lastTypingSent).TotalSeconds < 2) return;
+            _lastTypingSent = now;
+            _ = P2PChatService.SendVoiceSignalAsync(_peerIp, _peerPort, $"TYPING|{_username}");
+        }
+
+        private void OnPeerTyping(string senderName)
+        {
+            if (senderName != _currentChatPeer) return;
+            if (InvokeRequired) { Invoke(() => OnPeerTyping(senderName)); return; }
+
+            SetStatus($"{senderName} đang nhập...", Color.FromArgb(100, 210, 100));
+            _peerTypingClearTimer?.Dispose();
+            _peerTypingClearTimer = new System.Threading.Timer(_ =>
+            {
+                try
+                {
+                    if (IsDisposed) return;
+                    Invoke(() =>
+                    {
+                        if (lblStatus.Text.EndsWith("đang nhập..."))
+                            SetStatus(_p2pReady ? $"Sẵn sàng chat với {_currentChatPeer}" : "Chờ kết nối P2P...",
+                                      Color.FromArgb(160, 160, 180));
+                    });
+                }
+                catch { }
+            }, null, 3000, System.Threading.Timeout.Infinite);
         }
 
         // ══════════════════════════════════════════════════════════════
@@ -903,6 +1037,338 @@ namespace Client_UI_App.Forms
         }
 
         // ══════════════════════════════════════════════════════════════
+        //  VIDEO CALL — 1:1 (kể cả Bot VTuber mode)
+        // ══════════════════════════════════════════════════════════════
+
+        private async void btnVideoCall_Click(object? sender, EventArgs e)
+        {
+            if (!_p2pReady) return;
+            if (_activeVideoCall != null)
+            {
+                SetStatus("Bạn đang trong một video call khác.", Color.OrangeRed);
+                return;
+            }
+
+            if (_isBotPeer)
+            {
+                await HandleBotVideoCallAsync();
+                return;
+            }
+
+            btnVideoCall.Enabled = false;
+            SetStatus($"Đang gọi video cho {_peerName}...", Color.DodgerBlue);
+
+            try
+            {
+                _activeVideoCall  = new VideoCallService();
+                _videoCallPeer    = _peerName;
+                _videoCallPeerIp  = _peerIp;
+                _videoCallPeerPort = _peerPort;
+
+                _activeVideoCall.Prepare();
+
+                _videoCaptureService = TryStartCamera();
+
+                await P2PChatService.SendVoiceSignalAsync(_peerIp, _peerPort,
+                    $"VIDEO_OFFER|{_username}|{_activeVideoCall.AudioLocalPort}|{_activeVideoCall.VideoLocalPort}");
+
+                ShowVideoCallForm(_peerName, isOutgoing: true);
+            }
+            catch (Exception ex)
+            {
+                _activeVideoCall?.Stop();
+                _activeVideoCall = null;
+                _videoCaptureService?.Dispose();
+                _videoCaptureService = null;
+                SetStatus($"Lỗi video call: {ex.Message}", Color.Crimson);
+                btnVideoCall.Enabled = true;
+            }
+        }
+
+        // ── Video call với Bot (VTuber mode) ─────────────────────────
+        private async Task HandleBotVideoCallAsync()
+        {
+            btnVideoCall.Enabled = false;
+            SetStatus("Đang kết nối video call với UitiChan (VTuber mode)...", Color.DodgerBlue);
+            try
+            {
+                _activeVideoCall = new VideoCallService();
+                _videoCallPeer   = "UitiChan";
+                _activeVideoCall.Prepare();
+
+                _videoCaptureService = TryStartCamera();
+
+                var botTcp    = new System.Net.Sockets.TcpClient();
+                await botTcp.ConnectAsync("127.0.0.1", 5555);
+                var botStream = botTcp.GetStream();
+                var botWriter = new StreamWriter(botStream, new System.Text.UTF8Encoding(false)) { AutoFlush = true };
+                var botReader = new StreamReader(botStream, System.Text.Encoding.UTF8);
+
+                await botWriter.WriteLineAsync(
+                    $"VIDEO_OFFER|{_username}|{_activeVideoCall.AudioLocalPort}|{_activeVideoCall.VideoLocalPort}");
+
+                string? acceptLine = await botReader.ReadLineAsync();
+                if (acceptLine == null || !acceptLine.StartsWith("VIDEO_ACCEPT|"))
+                {
+                    SetStatus("Bot không chấp nhận video call.", Color.OrangeRed);
+                    _activeVideoCall.Stop(); _activeVideoCall = null;
+                    _videoCaptureService?.Dispose(); _videoCaptureService = null;
+                    botTcp.Close(); btnVideoCall.Enabled = true;
+                    return;
+                }
+
+                string[] ap = acceptLine.Split('|');
+                if (ap.Length < 3 || !int.TryParse(ap[1], out int botAudio) || !int.TryParse(ap[2], out int botVideo))
+                {
+                    SetStatus("Bot trả signaling không hợp lệ.", Color.Crimson);
+                    _activeVideoCall.Stop(); _activeVideoCall = null;
+                    _videoCaptureService?.Dispose(); _videoCaptureService = null;
+                    botTcp.Close(); btnVideoCall.Enabled = true;
+                    return;
+                }
+
+                _activeVideoCall.SetRemoteEndpoint("127.0.0.1", botAudio, botVideo);
+                _botCallTcp    = botTcp;
+                _botCallWriter = botWriter;
+
+                ShowVideoCallForm("UitiChan", isOutgoing: false);
+                _activeVideoCall.Start();
+
+                // Background: đọc VOICE_CAPTION từ bot TCP
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        while (true)
+                        {
+                            string? line = await botReader.ReadLineAsync();
+                            if (line == null) break;
+                            if (line.StartsWith("VOICE_CAPTION|"))
+                                _videoCallForm?.AddCaption("UitiChan", line[14..]);
+                            else if (line.StartsWith("VOICE_CAPTION_USER|"))
+                                _videoCallForm?.AddCaption(_username, line[19..]);
+                        }
+                    }
+                    catch { }
+                    finally
+                    {
+                        _botCallTcp?.Close();
+                        _botCallTcp    = null;
+                        _botCallWriter = null;
+                    }
+                });
+
+                SetStatus("Đang video call UitiChan ♪", Color.SeaGreen);
+            }
+            catch (Exception ex)
+            {
+                _activeVideoCall?.Stop();
+                _activeVideoCall = null;
+                _videoCaptureService?.Dispose();
+                _videoCaptureService = null;
+                _botCallTcp?.Close();
+                _botCallTcp    = null;
+                _botCallWriter = null;
+                SetStatus($"Lỗi bot video call: {ex.Message}", Color.Crimson);
+                btnVideoCall.Enabled = true;
+            }
+        }
+
+        // Nhận VIDEO_OFFER từ peer
+        private void OnIncomingVideoCall(string callerName, string callerAudioPortStr, string callerVideoPortStr)
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(async () => await HandleIncomingVideoCallAsync(callerName, callerAudioPortStr, callerVideoPortStr));
+                return;
+            }
+            _ = HandleIncomingVideoCallAsync(callerName, callerAudioPortStr, callerVideoPortStr);
+        }
+
+        private async Task HandleIncomingVideoCallAsync(string callerName, string callerAudioPortStr, string callerVideoPortStr)
+        {
+            var answer = MessageBox.Show(
+                $"📹  Video call từ  {callerName}\n\nBạn có muốn trả lời không?",
+                "Video call đến",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            int dirPort = await DirectoryService.GetDirectoryPortAsync();
+            var (found, ipPort) = await DirectoryService.GetUserAsync(dirPort, callerName);
+            if (!found) { SetStatus("Không tìm thấy IP người gọi.", Color.OrangeRed); return; }
+
+            string[] pp = ipPort.Split(':');
+            if (pp.Length != 2 || !int.TryParse(pp[1], out int callerTcpPort)) return;
+            string callerIp = pp[0];
+
+            if (answer != DialogResult.Yes)
+            {
+                await P2PChatService.SendVoiceSignalAsync(callerIp, callerTcpPort, $"VIDEO_REJECT|{_username}");
+                return;
+            }
+
+            if (_activeVideoCall != null)
+            {
+                await P2PChatService.SendVoiceSignalAsync(callerIp, callerTcpPort, $"VIDEO_REJECT|{_username}");
+                SetStatus("Đang bận, không thể nhận video call.", Color.OrangeRed);
+                return;
+            }
+
+            if (!int.TryParse(callerAudioPortStr, out int callerAudioPort) ||
+                !int.TryParse(callerVideoPortStr, out int callerVideoPort))
+            {
+                SetStatus("Signaling: port không hợp lệ.", Color.Crimson);
+                return;
+            }
+
+            try
+            {
+                _activeVideoCall   = new VideoCallService();
+                _videoCallPeer     = callerName;
+                _videoCallPeerIp   = callerIp;
+                _videoCallPeerPort = callerTcpPort;
+
+                _activeVideoCall.Prepare();
+                _activeVideoCall.SetRemoteEndpoint(callerIp, callerAudioPort, callerVideoPort);
+
+                _videoCaptureService = TryStartCamera();
+
+                await P2PChatService.SendVoiceSignalAsync(callerIp, callerTcpPort,
+                    $"VIDEO_ANSWER|{_username}|{_activeVideoCall.AudioLocalPort}|{_activeVideoCall.VideoLocalPort}");
+
+                ShowVideoCallForm(callerName, isOutgoing: false);
+                _activeVideoCall.Start();
+            }
+            catch (Exception ex)
+            {
+                _activeVideoCall?.Stop();
+                _activeVideoCall = null;
+                _videoCaptureService?.Dispose();
+                _videoCaptureService = null;
+                SetStatus($"Lỗi nhận video call: {ex.Message}", Color.Crimson);
+            }
+        }
+
+        // Nhận VIDEO_ANSWER — caller nhận ports của callee
+        private void OnVideoCallAnswered(string peerName, string answererAudioPortStr, string answererVideoPortStr)
+        {
+            if (_activeVideoCall == null || peerName != _videoCallPeer) return;
+            try
+            {
+                if (!int.TryParse(answererAudioPortStr, out int aPort) ||
+                    !int.TryParse(answererVideoPortStr, out int vPort))
+                {
+                    if (InvokeRequired) Invoke(() => SetStatus("Signaling: port không hợp lệ.", Color.Crimson));
+                    else SetStatus("Signaling: port không hợp lệ.", Color.Crimson);
+                    return;
+                }
+                _activeVideoCall.SetRemoteEndpoint(_videoCallPeerIp, aPort, vPort);
+                _activeVideoCall.Start();
+            }
+            catch (Exception ex)
+            {
+                if (InvokeRequired) Invoke(() => SetStatus($"Lỗi kết nối video: {ex.Message}", Color.Crimson));
+                else SetStatus($"Lỗi kết nối video: {ex.Message}", Color.Crimson);
+            }
+        }
+
+        private void OnVideoCallRejected(string peerName)
+        {
+            if (InvokeRequired) { Invoke(() => OnVideoCallRejected(peerName)); return; }
+            _videoCallForm?.Close();
+            _videoCallForm = null;
+            _activeVideoCall?.Stop();
+            _activeVideoCall = null;
+            _videoCaptureService?.Dispose();
+            _videoCaptureService = null;
+            btnVideoCall.Enabled = _p2pReady;
+            SetStatus($"{peerName} từ chối video call.", Color.OrangeRed);
+        }
+
+        private void OnVideoCallHungUp(string peerName)
+        {
+            if (InvokeRequired) { Invoke(() => OnVideoCallHungUp(peerName)); return; }
+            _videoCallForm?.Close();
+            _videoCallForm = null;
+            _activeVideoCall?.Stop();
+            _activeVideoCall = null;
+            _videoCaptureService?.Dispose();
+            _videoCaptureService = null;
+            btnVideoCall.Enabled = _p2pReady;
+            SetStatus($"Video call với {peerName} đã kết thúc.", Color.OrangeRed);
+        }
+
+        private void ShowVideoCallForm(string peerName, bool isOutgoing)
+        {
+            if (_videoCallForm != null && !_videoCallForm.IsDisposed)
+            {
+                _videoCallForm.BringToFront();
+                return;
+            }
+
+            string status = isOutgoing ? "Đang gọi..." : "Đang kết nối...";
+            _videoCallForm = new VideoCallForm(peerName, _activeVideoCall!, _videoCaptureService, status);
+
+            // Wire camera frames → video service (nếu có camera)
+            if (_videoCaptureService != null)
+                _videoCaptureService.FrameCaptured += _activeVideoCall!.SendVideoFrame;
+
+            _videoCallForm.HangupRequested += async _ =>
+            {
+                bool isBot = peerName == "UitiChan";
+                if (isBot)
+                {
+                    if (_botCallWriter != null)
+                    {
+                        try { await _botCallWriter.WriteLineAsync("VIDEO_HANGUP"); } catch { }
+                        _botCallTcp?.Close();
+                        _botCallTcp    = null;
+                        _botCallWriter = null;
+                    }
+                }
+                else if (!string.IsNullOrEmpty(_videoCallPeerIp) && _videoCallPeerPort != 0)
+                {
+                    await P2PChatService.SendVoiceSignalAsync(
+                        _videoCallPeerIp, _videoCallPeerPort, $"VIDEO_HANGUP|{_username}");
+                }
+
+                if (_videoCaptureService != null)
+                {
+                    if (_activeVideoCall != null)
+                        _videoCaptureService.FrameCaptured -= _activeVideoCall.SendVideoFrame;
+                    _videoCaptureService.Dispose();
+                    _videoCaptureService = null;
+                }
+                _activeVideoCall?.Stop();
+                _activeVideoCall = null;
+                _videoCallForm   = null;
+                Invoke(() =>
+                {
+                    btnVideoCall.Enabled = _p2pReady;
+                    SetStatus("Video call đã kết thúc.", Color.SeaGreen);
+                });
+            };
+
+            _videoCallForm.FormClosed += (_, _) => { _videoCallForm = null; };
+            _videoCallForm.Show(this);
+        }
+
+        // Khởi động camera; trả null nếu không có camera (video call vẫn tiếp tục)
+        private static VideoCaptureService? TryStartCamera()
+        {
+            try
+            {
+                var svc = new VideoCaptureService();
+                svc.Start();
+                return svc;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════
         //  FORM LIFECYCLE
         // ══════════════════════════════════════════════════════════════
 
@@ -911,10 +1377,16 @@ namespace Client_UI_App.Forms
             // Hủy đăng ký events
             P2PListenerService.MessageReceived   -= OnIncomingMessage;
             P2PListenerService.FileReceived      -= OnIncomingFile;
+            P2PListenerService.TypingReceived    -= OnPeerTyping;
             P2PListenerService.IncomingVoiceCall -= OnIncomingVoiceCall;
+            _peerTypingClearTimer?.Dispose();
             P2PListenerService.VoiceCallAnswered -= OnVoiceCallAnswered;
             P2PListenerService.VoiceCallRejected -= OnVoiceCallRejected;
             P2PListenerService.VoiceCallHungUp   -= OnVoiceCallHungUp;
+            P2PListenerService.IncomingVideoCall -= OnIncomingVideoCall;
+            P2PListenerService.VideoCallAnswered -= OnVideoCallAnswered;
+            P2PListenerService.VideoCallRejected -= OnVideoCallRejected;
+            P2PListenerService.VideoCallHungUp   -= OnVideoCallHungUp;
 
             // Kết thúc cuộc gọi đang active (nếu có)
             if (_activecall != null)
@@ -923,6 +1395,19 @@ namespace Client_UI_App.Forms
                     await P2PChatService.SendVoiceSignalAsync(
                         _callPeerIp, _callPeerPort, $"VOICE_HANGUP|{_username}");
                 _activecall.Stop();
+            }
+
+            if (_activeVideoCall != null)
+            {
+                if (!string.IsNullOrEmpty(_videoCallPeerIp) && _videoCallPeerPort != 0)
+                    await P2PChatService.SendVoiceSignalAsync(
+                        _videoCallPeerIp, _videoCallPeerPort, $"VIDEO_HANGUP|{_username}");
+                if (_videoCaptureService != null)
+                {
+                    _videoCaptureService.FrameCaptured -= _activeVideoCall.SendVideoFrame;
+                    _videoCaptureService.Dispose();
+                }
+                _activeVideoCall.Stop();
             }
 
             // Đóng tất cả group forms
