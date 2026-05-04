@@ -255,7 +255,7 @@ static void HandleClient(
                 lock (grp.Members)
                     memberList = string.Join(",", grp.Members);
 
-                writer.WriteLine($"GROUP_JOIN_SUCCESS|{grp.Name}|{memberList}");
+                writer.WriteLine($"GROUP_JOIN_SUCCESS|{grp.Name}|{grp.Creator}|{memberList}");
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.WriteLine($"[GROUP] {username} joined '{grp.Name}' [{groupId}]");
                 Console.ResetColor();
