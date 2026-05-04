@@ -16,10 +16,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- NAudio: WaveInEvent (MME capture) + WaveOutEvent (playback) -->
     <PackageReference Include="NAudio" Version="2.3.0" />
     <!-- Concentus: Opus codec pure C# — không cần native DLL -->
     <PackageReference Include="Concentus" Version="2.2.2" />
+    <!-- AForge: DirectShow webcam capture (Phase 4 video call) -->
+    <PackageReference Include="AForge.Video.DirectShow" Version="2.2.5" />
   </ItemGroup>
 
 </Project>
