@@ -70,6 +70,9 @@ namespace Client_UI_App.Forms
         private Panel? _pnlGroupHost;         // Panel nhúng GroupChatForm vào pnlRight
         private bool   _suppressUserSelection; // Tránh re-entrancy khi ClearSelected
 
+        // ── Hàng đợi tin nhắn offline (gửi lại khi peer online) ──────
+        private readonly Dictionary<string, List<string>> _offlineQueue = new();
+
         // ─────────────────────────────────────────────────────────────
         public MainChatForm(string username, int dirPort, List<string> onlineUsers)
         {
@@ -463,6 +466,10 @@ namespace Client_UI_App.Forms
                 _isBotPeer = selected == "UitiChan";
                 _p2pReady  = true;
 
+                // Gửi lại tin nhắn đã lưu khi peer offline
+                if (!_isBotPeer && _offlineQueue.TryGetValue(selected, out var pending) && pending.Count > 0)
+                    _ = DrainOfflineQueueAsync(selected);
+
                 // Chuyển session chat
                 _currentChatPeer    = selected;
                 _unreadCounts[selected] = 0;
@@ -707,10 +714,21 @@ namespace Client_UI_App.Forms
                     SetStatus("Đã gửi", Color.SeaGreen);
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                AppendChat($"[Lỗi gửi] {ex.Message}", Color.Crimson);
-                SetStatus($"Lỗi: {ex.Message}", Color.Crimson);
+                if (!_isBotPeer)
+                {
+                    if (!_offlineQueue.ContainsKey(_peerName))
+                        _offlineQueue[_peerName] = new List<string>();
+                    _offlineQueue[_peerName].Add(message);
+                    AppendChat($"↻  Tin nhắn đã lưu, sẽ gửi khi {_peerName} online.", Color.FromArgb(180, 130, 50));
+                    SetStatus($"{_peerName} không online — tin nhắn đã lưu hàng đợi.", Color.OrangeRed);
+                }
+                else
+                {
+                    AppendChat("[Lỗi gửi] Bot không phản hồi.", Color.Crimson);
+                    SetStatus("Bot offline hoặc không phản hồi.", Color.OrangeRed);
+                }
             }
             finally
             {
@@ -767,6 +785,33 @@ namespace Client_UI_App.Forms
                 btnSendFile.Enabled = true;
                 txtMessage.Focus();
             }
+        }
+
+        // Gửi lại tin nhắn đã lưu khi peer online trở lại
+        private async Task DrainOfflineQueueAsync(string peerName)
+        {
+            if (!_offlineQueue.TryGetValue(peerName, out var queue) || queue.Count == 0) return;
+
+            var toSend = queue.ToList();
+            queue.Clear();
+
+            int sent = 0;
+            foreach (string msg in toSend)
+            {
+                try
+                {
+                    await P2PChatService.SendToClientAsync(_peerIp, _peerPort, _username, msg);
+                    sent++;
+                }
+                catch
+                {
+                    queue.AddRange(toSend.Skip(sent));
+                    break;
+                }
+            }
+
+            if (sent > 0 && !IsDisposed)
+                Invoke(() => SetStatus($"Đã gửi lại {sent} tin nhắn đã lưu tới {peerName}", Color.SeaGreen));
         }
 
         private void txtMessage_KeyDown(object sender, KeyEventArgs e)

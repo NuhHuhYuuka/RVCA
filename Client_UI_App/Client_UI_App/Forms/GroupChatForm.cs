@@ -590,8 +590,6 @@ namespace Client_UI_App.Forms
                 _videoForm?.Close();
                 _videoForm = null;
 
-                if (_videoCapture != null && _videoService != null)
-                    _videoCapture.FrameCaptured -= _videoService.SendVideoFrame;
                 _videoCapture?.Dispose(); _videoCapture = null;
 
                 _videoService?.Stop(); _videoService = null;
@@ -617,15 +615,11 @@ namespace Client_UI_App.Forms
             _videoForm.LeaveRequested += async () => await LeaveVideoAsync();
             _videoForm.FormClosed     += (_, _) => { _videoForm = null; };
 
-            // Wire camera
-            if (_videoCapture != null)
-                _videoCapture.FrameCaptured += _videoService!.SendVideoFrame;
-
             // Thêm tile cho các peer đang trong channel
             foreach (string m in _videoMembers)
                 if (m != _myUsername) _videoForm.AddPeerTile(m);
 
-            _videoForm.Show(this);
+            _videoForm.Show();
         }
 
         // Peer vừa JOIN video channel
