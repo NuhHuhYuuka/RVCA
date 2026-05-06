@@ -48,7 +48,7 @@ namespace Client_UI_App.Forms
             {
                 pnlSubtitle.Visible = true;
                 this.ClientSize     = new System.Drawing.Size(
-                    this.ClientSize.Width, this.ClientSize.Height + 130);
+                    this.ClientSize.Width, this.ClientSize.Height + pnlSubtitle.Height);
             }
 
             _svc.CallConnected   += OnCallConnected;

@@ -67,6 +67,8 @@ namespace Client_UI_App.Forms
         // ── Groups ────────────────────────────────────────────────────
         private readonly List<(string Id, string Name, string Creator)> _myGroups = new();
         private readonly Dictionary<string, GroupChatForm>   _openGroupForms = new();
+        private Panel? _pnlGroupHost;         // Panel nhúng GroupChatForm vào pnlRight
+        private bool   _suppressUserSelection; // Tránh re-entrancy khi ClearSelected
 
         // ─────────────────────────────────────────────────────────────
         public MainChatForm(string username, int dirPort, List<string> onlineUsers)
@@ -108,6 +110,15 @@ namespace Client_UI_App.Forms
 
             // Peer avatar mặc định
             picPeerAvatar.Image = AvatarService.CreateInitialsBitmap("?", 34);
+
+            // Panel nhúng GroupChatForm — Dock=Fill, ẩn mặc định
+            _pnlGroupHost = new Panel
+            {
+                Dock      = DockStyle.Fill,
+                Visible   = false,
+                BackColor = Color.FromArgb(20, 20, 30)
+            };
+            pnlRight.Controls.Add(_pnlGroupHost);
 
             // ApplyCircularClip gọi sau Shown — lúc đó control đã có kích thước thật
             this.Shown += OnFirstShown;
@@ -397,7 +408,7 @@ namespace Client_UI_App.Forms
 
         private async void listBoxUsers_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (_inUserSelection) return;
+            if (_inUserSelection || _suppressUserSelection) return;
             _inUserSelection = true;
             try { await HandleUserSelectionAsync(); }
             finally { _inUserSelection = false; }
@@ -407,6 +418,8 @@ namespace Client_UI_App.Forms
         {
             int idx = listBoxUsers.SelectedIndex;
             if (idx < 0 || idx >= _userList.Count) return;
+
+            DeactivateGroupHost(); // ẩn group chat khi chuyển sang peer
 
             string selected = _userList[idx];
 
@@ -466,9 +479,10 @@ namespace Client_UI_App.Forms
                 SetPeerInfo($"● {selected}  ({modeLabel})", clrConnected);
                 SetStatus($"Sẵn sàng chat với {selected}", Color.SeaGreen);
 
-                // Nút gọi hiện với cả bot và client
-                btnCall.Visible      = true;
-                btnVideoCall.Visible = !_isBotPeer; // video call chỉ cho người thật
+                // Không cho phép tự gọi cho chính mình
+                bool isSelf = selected == _username;
+                btnCall.Visible      = !isSelf;
+                btnVideoCall.Visible = !isSelf && !_isBotPeer;
 
                 txtMessage.Focus();
             }
@@ -578,7 +592,7 @@ namespace Client_UI_App.Forms
             }
         }
 
-        private void listBoxGroups_DoubleClick(object sender, EventArgs e)
+        private void listBoxGroups_Click(object sender, EventArgs e)
         {
             int idx = listBoxGroups.SelectedIndex;
             if (idx < 0 || idx >= _myGroups.Count) return;
@@ -588,16 +602,62 @@ namespace Client_UI_App.Forms
 
         private void OpenGroupChat(string groupId, string groupName, string creator)
         {
+            if (_pnlGroupHost == null) return;
+
+            // Group này đang mở → chỉ activate lại (không tạo mới)
             if (_openGroupForms.TryGetValue(groupId, out GroupChatForm? existing) && !existing.IsDisposed)
             {
-                existing.BringToFront();
-                existing.Focus();
+                ActivateGroupHost();
                 return;
             }
+
+            // Đóng group cũ (chỉ mở 1 group tại 1 thời điểm)
+            foreach (var old in _openGroupForms.Values.ToList())
+                if (!old.IsDisposed) old.Close();
+            _openGroupForms.Clear();
+            _pnlGroupHost.Controls.Clear();
+
+            // Nhúng GroupChatForm vào pnlRight thay vì mở floating window
             var form = new GroupChatForm(_username, groupId, groupName, creator);
-            form.FormClosed += (_, _) => _openGroupForms.Remove(groupId);
+            form.TopLevel         = false;
+            form.FormBorderStyle  = FormBorderStyle.None;
+            form.Dock             = DockStyle.Fill;
+            form.FormClosed += (_, _) =>
+            {
+                _openGroupForms.Remove(groupId);
+                DeactivateGroupHost();
+            };
+
             _openGroupForms[groupId] = form;
-            form.Show(this);
+            _pnlGroupHost.Controls.Add(form);
+            form.Show();
+            ActivateGroupHost();
+        }
+
+        private void ActivateGroupHost()
+        {
+            if (_pnlGroupHost == null) return;
+            // Deselect user list (dùng flag để tránh trigger HandleUserSelectionAsync)
+            _suppressUserSelection = true;
+            listBoxUsers.ClearSelected();
+            _suppressUserSelection = false;
+            // Reset trạng thái peer
+            _p2pReady            = false;
+            _peerName            = "";
+            btnCall.Visible      = false;
+            btnVideoCall.Visible = false;
+            // Ẩn P2P chat, hiện group host
+            rtbChat.Visible      = false;
+            pnlBottom.Visible    = false;
+            _pnlGroupHost.Visible = true;
+        }
+
+        private void DeactivateGroupHost()
+        {
+            if (_pnlGroupHost == null || !_pnlGroupHost.Visible) return;
+            _pnlGroupHost.Visible = false;
+            rtbChat.Visible       = true;
+            pnlBottom.Visible     = true;
         }
 
         // ══════════════════════════════════════════════════════════════
@@ -1309,9 +1369,7 @@ namespace Client_UI_App.Forms
             string status = isOutgoing ? "Đang gọi..." : "Đang kết nối...";
             _videoCallForm = new VideoCallForm(peerName, _activeVideoCall!, _videoCaptureService, status);
 
-            // Wire camera frames → video service (nếu có camera)
-            if (_videoCaptureService != null)
-                _videoCaptureService.FrameCaptured += _activeVideoCall!.SendVideoFrame;
+            // VideoCallForm.OnLocalFrame đã tự gọi _svc.SendVideoFrame — không subscribe thêm để tránh double-send
 
             _videoCallForm.HangupRequested += async _ =>
             {
@@ -1334,8 +1392,6 @@ namespace Client_UI_App.Forms
 
                 if (_videoCaptureService != null)
                 {
-                    if (_activeVideoCall != null)
-                        _videoCaptureService.FrameCaptured -= _activeVideoCall.SendVideoFrame;
                     _videoCaptureService.Dispose();
                     _videoCaptureService = null;
                 }

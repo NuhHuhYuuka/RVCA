@@ -163,8 +163,8 @@ namespace Client_UI_App.Forms
 
             btnMute.Text      = "🔇  Tắt mic";
             btnMute.Font      = new Font("Segoe UI", 13F);
-            btnMute.Size      = new Size(140, 54);
-            btnMute.Location  = new Point(0, 4);
+            btnMute.Size      = new Size(120, 54);
+            btnMute.Location  = new Point(0, 6);
             btnMute.BackColor = Color.FromArgb(50, 50, 72);
             btnMute.ForeColor = clrTextMain;
             btnMute.FlatStyle = FlatStyle.Flat;
@@ -176,8 +176,8 @@ namespace Client_UI_App.Forms
 
             btnHangup.Text      = "📵  Cúp máy";
             btnHangup.Font      = new Font("Segoe UI", 13F, FontStyle.Bold);
-            btnHangup.Size      = new Size(150, 54);
-            btnHangup.Location  = new Point(148, 4);
+            btnHangup.Size      = new Size(136, 54);
+            btnHangup.Location  = new Point(128, 6);
             btnHangup.BackColor = clrRed;
             btnHangup.ForeColor = Color.White;
             btnHangup.FlatStyle = FlatStyle.Flat;
@@ -207,7 +207,7 @@ namespace Client_UI_App.Forms
             this.AutoScaleDimensions = new SizeF(7F, 15F);
             this.AutoScaleMode       = AutoScaleMode.Font;
             this.BackColor           = clrBg;
-            this.ClientSize          = new Size(320, 420);
+            this.ClientSize          = new Size(320, 480);
             this.FormBorderStyle     = FormBorderStyle.FixedDialog;
             this.MaximizeBox         = false;
             this.MinimizeBox         = false;

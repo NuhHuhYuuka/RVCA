@@ -136,7 +136,7 @@ namespace Client_UI_App.Forms
             listBoxGroups.BackColor             = clrBgList;
             listBoxGroups.ForeColor             = clrTextMain;
             listBoxGroups.Padding               = new Padding(4, 0, 0, 0);
-            listBoxGroups.DoubleClick          += listBoxGroups_DoubleClick;
+            listBoxGroups.Click                 += listBoxGroups_Click;
 
             // Hàng nút nhóm: [+ Tạo] [→ Tham gia]
             pnlGroupButtons.Dock      = DockStyle.Top;

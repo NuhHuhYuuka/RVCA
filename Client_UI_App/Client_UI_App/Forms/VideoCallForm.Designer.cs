@@ -206,9 +206,9 @@ namespace Client_UI_App.Forms
             pnlVideoArea.Dock      = DockStyle.Fill;
             pnlVideoArea.BackColor = Color.Black;
 
-            // Thêm picRemote trước (z-order thấp), pnlLocalOverlay sau (hiện đè lên)
-            pnlVideoArea.Controls.Add(picRemote);
+            // pnlLocalOverlay thêm trước → index 0 → z-order cao nhất → hiện đè lên picRemote
             pnlVideoArea.Controls.Add(pnlLocalOverlay);
+            pnlVideoArea.Controls.Add(picRemote);
 
             // ── Form ────────────────────────────────────────────────────
             this.AutoScaleDimensions = new SizeF(7F, 15F);
