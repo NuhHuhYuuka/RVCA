@@ -34,6 +34,8 @@ await TryInitWhisperAsync();
 int p2pPort = 5555;
 int activeDirectoryPort = 0; // Biến lưu trữ cổng của Server Danh bạ để dùng cho lúc LOGOUT
 string aesSecretKey = "LTMCB_Secret_Key_2026"; // Chìa khóa E2EE chung cho cả nhóm
+string serverIp    = Environment.GetEnvironmentVariable("SERVER_IP") ?? "127.0.0.1";
+string botPublicIp = Environment.GetEnvironmentVariable("BOT_IP")    ?? serverIp;
 
 // Đăng ký sự kiện bắt buộc gửi LOGOUT khi người dùng bấm dấu X tắt Console
 AppDomain.CurrentDomain.ProcessExit += (sender, eventArgs) => SendLogoutSignal();
@@ -56,7 +58,7 @@ void SendLogoutSignal()
 
         try
         {
-            using TcpClient logoutClient = new TcpClient("127.0.0.1", targetPort);
+            using TcpClient logoutClient = new TcpClient(serverIp, targetPort);
             using StreamWriter logoutWriter = new StreamWriter(logoutClient.GetStream(), Encoding.UTF8) { AutoFlush = true };
 
             // Gửi tín hiệu
@@ -91,7 +93,7 @@ try
     Console.WriteLine($"[INFO] Được phân luồng sang Directory Server Port: {dirPort1}. Đang thử LOGIN...");
     Console.ResetColor();
 
-    string loginResponse = await SendDirectoryCommandAsync(dirPort1, $"LOGIN|UitiChan|123456|{p2pPort}");
+    string loginResponse = await SendDirectoryCommandAsync(dirPort1, $"LOGIN|UitiChan|123456|{botPublicIp}:{p2pPort}");
 
     // Nếu tài khoản chưa tồn tại trong DB → tự đăng ký
     if (loginResponse.StartsWith("LOGIN_FAILED"))
@@ -110,7 +112,7 @@ try
         // Xin vé mới rồi LOGIN lần 2
         int dirPort2 = await GetDirectoryPortAsync();
         activeDirectoryPort = dirPort2;
-        loginResponse = await SendDirectoryCommandAsync(dirPort2, $"LOGIN|UitiChan|123456|{p2pPort}");
+        loginResponse = await SendDirectoryCommandAsync(dirPort2, $"LOGIN|UitiChan|123456|{botPublicIp}:{p2pPort}");
     }
 
     Console.ForegroundColor = loginResponse.StartsWith("SUCCESS") ? ConsoleColor.Green : ConsoleColor.Red;
@@ -1126,7 +1128,8 @@ static string SanitizePronoun(string text)
 // ── Hỏi Load Balancer để lấy Port của Directory Server ───────────────
 static async Task<int> GetDirectoryPortAsync()
 {
-    using TcpClient lbClient = new TcpClient("127.0.0.1", 9000);
+    string serverIp = Environment.GetEnvironmentVariable("SERVER_IP") ?? "127.0.0.1";
+    using TcpClient lbClient = new TcpClient(serverIp, 9000);
     NetworkStream lbStream = lbClient.GetStream();
     byte[] portBuffer = new byte[32];
     int bytesRead = await lbStream.ReadAsync(portBuffer, 0, portBuffer.Length);
@@ -1137,7 +1140,8 @@ static async Task<int> GetDirectoryPortAsync()
 // (Directory Server xử lý 1 command/connection rồi đóng – dùng connection riêng)
 static async Task<string> SendDirectoryCommandAsync(int dirPort, string command)
 {
-    using TcpClient client = new TcpClient("127.0.0.1", dirPort);
+    string serverIp = Environment.GetEnvironmentVariable("SERVER_IP") ?? "127.0.0.1";
+    using TcpClient client = new TcpClient(serverIp, dirPort);
     NetworkStream stream = client.GetStream();
     using StreamReader  reader = new StreamReader(stream, Encoding.UTF8);
     using StreamWriter  writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
