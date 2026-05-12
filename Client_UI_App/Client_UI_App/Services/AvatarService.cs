@@ -46,10 +46,15 @@ namespace Client_UI_App.Services
         }
 
         // Load Bitmap từ file (trả null nếu không có hoặc lỗi)
+        // Dùng bản sao in-memory để tránh lock file — cho phép SaveUserAvatar ghi đè sau này
         public static Bitmap? LoadBitmap(string path)
         {
             if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
-            try { return new Bitmap(path); }
+            try
+            {
+                using var locked = new Bitmap(path);
+                return new Bitmap(locked); // clone vào RAM, giải phóng lock file ngay
+            }
             catch { return null; }
         }
 
