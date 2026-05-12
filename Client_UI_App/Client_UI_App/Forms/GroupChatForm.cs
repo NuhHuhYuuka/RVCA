@@ -110,9 +110,12 @@ namespace Client_UI_App.Forms
         {
             try
             {
-                using var orig = Image.FromFile(imagePath);
+                byte[] raw = File.ReadAllBytes(imagePath);
+                using var ms   = new MemoryStream(raw);
+                using var orig = Image.FromStream(ms);
                 int w = Math.Min(orig.Width, 220);
                 int h = orig.Width > 0 ? (int)(orig.Height * ((double)w / orig.Width)) : 120;
+                if (w <= 0 || h <= 0) return;
                 using var thumb = new Bitmap(w, h);
                 using (var g = Graphics.FromImage(thumb))
                 {
