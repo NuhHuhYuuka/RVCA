@@ -145,6 +145,8 @@ static void HandleClient(
             string username           = protocolParts[1];
             string password           = protocolParts[2];
             string clientListeningPort = protocolParts[3];
+            // Bot gửi "IP:Port" trực tiếp; client thường gửi chỉ port → dùng RemoteEndPoint
+            string fullAddressOverride = clientListeningPort.Contains(':') ? clientListeningPort : null!;
             string clientIP           = ((IPEndPoint)client.Client.RemoteEndPoint!).Address.ToString();
 
             try
@@ -160,7 +162,7 @@ static void HandleClient(
 
                 if (isAuthenticated > 0)
                 {
-                    string fullAddress = $"{clientIP}:{clientListeningPort}";
+                    string fullAddress = fullAddressOverride ?? $"{clientIP}:{clientListeningPort}";
                     directory.AddOrUpdate(username, fullAddress, (_, _) => fullAddress);
 
                     Console.ForegroundColor = ConsoleColor.Green;
