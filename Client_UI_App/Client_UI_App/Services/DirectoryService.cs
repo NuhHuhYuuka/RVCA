@@ -52,8 +52,22 @@ namespace Client_UI_App.Services
             return (ok, msg);
         }
 
+        // Lấy IP LAN thực của máy này (không phải loopback)
+        // Dùng "UDP trick": giả kết nối tới 8.8.8.8 để OS chọn interface ra ngoài
+        private static string GetLocalLanIp()
+        {
+            try
+            {
+                using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0);
+                socket.Connect("8.8.8.8", 65530);
+                return ((System.Net.IPEndPoint)socket.LocalEndPoint!).Address.ToString();
+            }
+            catch { return "127.0.0.1"; }
+        }
+
         // ── Đăng nhập và lấy danh sách user online ──
-        // Gửi: LOGIN|username|password|myListeningPort
+        // Gửi: LOGIN|username|password|myLanIp:myListeningPort
+        // Server đã hỗ trợ sẵn format "IP:Port" qua fullAddressOverride
         public static async Task<(bool success, string message, List<string> onlineUsers)> LoginAsync(
             int dirPort, string username, string password, int myListeningPort)
         {
@@ -64,7 +78,8 @@ namespace Client_UI_App.Services
             using StreamReader  reader = new(stream, Encoding.UTF8, leaveOpen: true);
             await using StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
 
-            await writer.WriteLineAsync($"LOGIN|{username}|{password}|{myListeningPort}");
+            string localIp = GetLocalLanIp();
+            await writer.WriteLineAsync($"LOGIN|{username}|{password}|{localIp}:{myListeningPort}");
 
             string response = await reader.ReadLineAsync() ?? string.Empty;
             string[] parts  = response.Split('|');
