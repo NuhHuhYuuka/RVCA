@@ -1,7 +1,7 @@
 ﻿using SecurityData.Models;
 using System;
 using System.Collections.Generic;
-using System.Data.SQLite;
+using Microsoft.Data.Sqlite;
 using System.IO;
 
 namespace SecurityData.Services
@@ -13,9 +13,6 @@ namespace SecurityData.Services
 
         public DatabaseService()
         {
-            if (!File.Exists(dbPath))
-                SQLiteConnection.CreateFile(dbPath);
-
             ExecuteNonQuery(@"
                 CREATE TABLE IF NOT EXISTS Messages (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,16 +31,16 @@ namespace SecurityData.Services
 
         private void ExecuteNonQuery(string sql)
         {
-            using (var conn = new SQLiteConnection($"Data Source={dbPath};Version=3;"))
+            using (var conn = new SqliteConnection($"Data Source={dbPath}"))
             {
                 conn.Open();
-                new SQLiteCommand(sql, conn).ExecuteNonQuery();
+                new SqliteCommand(sql, conn).ExecuteNonQuery();
             }
         }
 
         public void SaveMessage(ChatMessage msg)
         {
-            using (var conn = new SQLiteConnection($"Data Source={dbPath};Version=3;"))
+            using (var conn = new SqliteConnection($"Data Source={dbPath}"))
             {
                 conn.Open();
                 string sql = @"
@@ -52,7 +49,7 @@ namespace SecurityData.Services
                     VALUES
                     (@s, @r, @c, @f, @fn, @fp, @n, @t, @tf, datetime('now'))";
 
-                using (var cmd = new SQLiteCommand(sql, conn))
+                using (var cmd = new SqliteCommand(sql, conn))
                 {
                     cmd.Parameters.AddWithValue("@s", msg.Sender);
                     cmd.Parameters.AddWithValue("@r", msg.Receiver);
@@ -72,7 +69,7 @@ namespace SecurityData.Services
         {
             var list = new List<ChatMessage>();
 
-            using (var conn = new SQLiteConnection($"Data Source={dbPath};Version=3;"))
+            using (var conn = new SqliteConnection($"Data Source={dbPath}"))
             {
                 conn.Open();
 
@@ -81,7 +78,7 @@ namespace SecurityData.Services
                     WHERE Sender = @peer OR Receiver = @peer
                     ORDER BY Time ASC";
 
-                using (var cmd = new SQLiteCommand(sql, conn))
+                using (var cmd = new SqliteCommand(sql, conn))
                 {
                     cmd.Parameters.AddWithValue("@peer", peer);
 
@@ -112,7 +109,7 @@ namespace SecurityData.Services
         }
         public void UpdateMessage(int id, ChatMessage msg)
         {
-            using (var conn = new SQLiteConnection($"Data Source={dbPath};Version=3;"))
+            using (var conn = new SqliteConnection($"Data Source={dbPath}"))
             {
                 conn.Open();
 
@@ -127,7 +124,7 @@ namespace SecurityData.Services
                 TransferId = @tf
             WHERE Id = @id";
 
-                using (var cmd = new SQLiteCommand(sql, conn))
+                using (var cmd = new SqliteCommand(sql, conn))
                 {
                     cmd.Parameters.AddWithValue("@id", id);
                     cmd.Parameters.AddWithValue("@c", msg.Content);
@@ -144,11 +141,11 @@ namespace SecurityData.Services
 
         public void DeleteMessage(int id)
         {
-            using (var conn = new SQLiteConnection($"Data Source={dbPath};Version=3;"))
+            using (var conn = new SqliteConnection($"Data Source={dbPath}"))
             {
                 conn.Open();
 
-                using (var cmd = new SQLiteCommand("DELETE FROM Messages WHERE Id = @id", conn))
+                using (var cmd = new SqliteCommand("DELETE FROM Messages WHERE Id = @id", conn))
                 {
                     cmd.Parameters.AddWithValue("@id", id);
                     cmd.ExecuteNonQuery();
@@ -158,10 +155,10 @@ namespace SecurityData.Services
 
         public void DeleteConversation(string peer)
         {
-            using (var conn = new SQLiteConnection($"Data Source={dbPath};Version=3;"))
+            using (var conn = new SqliteConnection($"Data Source={dbPath}"))
             {
                 conn.Open();
-                using (var cmd = new SQLiteCommand(
+                using (var cmd = new SqliteCommand(
                     "DELETE FROM Messages WHERE Sender = @peer OR Receiver = @peer", conn))
                 {
                     cmd.Parameters.AddWithValue("@peer", peer);

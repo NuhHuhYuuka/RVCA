@@ -8,9 +8,8 @@
     <NoWarn>SYSLIB0053</NoWarn>
   </PropertyGroup>
 
-  <!-- System.Data.SQLite dùng bởi DatabaseService.cs -->
   <ItemGroup>
-    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.119" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.7" />
   </ItemGroup>
 
 </Project>

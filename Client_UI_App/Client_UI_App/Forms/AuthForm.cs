@@ -70,7 +70,10 @@ namespace Client_UI_App.Forms
             }
             catch (Exception ex)
             {
-                SetStatus($"Lỗi kết nối: {ex.Message}", Color.Crimson);
+                var inner = ex.InnerException?.InnerException?.Message
+                          ?? ex.InnerException?.Message
+                          ?? ex.Message;
+                SetStatus($"Lỗi: {inner}", Color.Crimson);
                 SetBusy(false);
             }
         }

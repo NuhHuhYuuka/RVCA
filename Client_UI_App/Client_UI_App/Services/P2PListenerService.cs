@@ -50,8 +50,8 @@ namespace Client_UI_App.Services
         // Group voice leave: (groupId, username)
         public static event Action<string, string>?                   GroupVoiceLeft;
 
-        // Voice signaling 1:1: (callerName, callerUdpPort)
-        public static event Action<string, string>? IncomingVoiceCall;
+        // Voice signaling 1:1: (callerName, callerUdpPort, callerIp, callerTcpPort)
+        public static event Action<string, string, string, int>? IncomingVoiceCall;
         // Voice signaling: (peerName, answererUdpPort)
         public static event Action<string, string>? VoiceCallAnswered;
         // Voice signaling: (peerName)
@@ -59,8 +59,8 @@ namespace Client_UI_App.Services
         // Voice signaling: (peerName)
         public static event Action<string>?         VoiceCallHungUp;
 
-        // Video signaling 1:1: (callerName, callerAudioPort, callerVideoPort)
-        public static event Action<string, string, string>? IncomingVideoCall;
+        // Video signaling 1:1: (callerName, callerAudioPort, callerVideoPort, callerIp, callerTcpPort)
+        public static event Action<string, string, string, string, int>? IncomingVideoCall;
         // Video signaling: (peerName, answererAudioPort, answererVideoPort)
         public static event Action<string, string, string>? VideoCallAnswered;
         // Video signaling: (peerName)
@@ -187,9 +187,10 @@ namespace Client_UI_App.Services
                 }
                 else if (firstLine.StartsWith("VOICE_OFFER|"))
                 {
-                    string[] parts = firstLine.Split('|', 3);
-                    if (parts.Length == 3)
-                        IncomingVoiceCall?.Invoke(parts[1], parts[2]);
+                    // VOICE_OFFER|callerName|callerUdpPort|callerTcpPort
+                    string[] parts = firstLine.Split('|', 4);
+                    if (parts.Length == 4 && int.TryParse(parts[3], out int callerTcp))
+                        IncomingVoiceCall?.Invoke(parts[1], parts[2], remoteIp, callerTcp);
                 }
                 else if (firstLine.StartsWith("VOICE_ANSWER|"))
                 {
@@ -211,10 +212,10 @@ namespace Client_UI_App.Services
                 }
                 else if (firstLine.StartsWith("VIDEO_OFFER|"))
                 {
-                    // VIDEO_OFFER|callerName|audioUdpPort|videoUdpPort
-                    string[] parts = firstLine.Split('|', 4);
-                    if (parts.Length == 4)
-                        IncomingVideoCall?.Invoke(parts[1], parts[2], parts[3]);
+                    // VIDEO_OFFER|callerName|audioUdpPort|videoUdpPort|callerTcpPort
+                    string[] parts = firstLine.Split('|', 5);
+                    if (parts.Length == 5 && int.TryParse(parts[4], out int callerTcp))
+                        IncomingVideoCall?.Invoke(parts[1], parts[2], parts[3], remoteIp, callerTcp);
                 }
                 else if (firstLine.StartsWith("VIDEO_ANSWER|"))
                 {

@@ -34,7 +34,7 @@ namespace Client_UI_App.Forms
         private bool   _inUserSelection = false;   // re-entrancy guard tránh StackOverflow
 
         // ── Lưu trữ tin nhắn cục bộ (SQLite) ────────────────────────
-        private readonly DatabaseService _db = new();
+        private DatabaseService? _db;
 
         // Màu dùng để nhận biết loại tin khi save/load DB
         private static readonly int _clrSentByMe = Color.FromArgb(80, 140, 220).ToArgb();
@@ -78,6 +78,8 @@ namespace Client_UI_App.Forms
         {
             _username = username;
             _dirPort  = dirPort;
+
+            try { _db = new DatabaseService(); } catch { /* SQLite unavailable — history disabled */ }
 
             InitializeComponent();
 
@@ -224,7 +226,7 @@ namespace Client_UI_App.Forms
                 try
                 {
                     bool isMine = color.ToArgb() == _clrSentByMe;
-                    _db.SaveMessage(new ChatMessage
+                    _db?.SaveMessage(new ChatMessage
                     {
                         Sender    = isMine ? _username : peer,
                         Receiver  = isMine ? peer : _username,
@@ -277,6 +279,7 @@ namespace Client_UI_App.Forms
         {
             try
             {
+                if (_db == null) return;
                 var history = _db.GetHistory(peer);
                 var session = new List<(string, string, Color)>();
                 foreach (var msg in history)
@@ -890,7 +893,8 @@ namespace Client_UI_App.Forms
 
                 int localUdpPort = _activecall.PrepareUdp();
                 await P2PChatService.SendVoiceSignalAsync(
-                    _peerIp, _peerPort, $"VOICE_OFFER|{_username}|{localUdpPort}");
+                    _peerIp, _peerPort,
+                    $"VOICE_OFFER|{_username}|{localUdpPort}|{P2PListenerService.ListeningPort}");
 
                 ShowCallForm(_peerName, isOutgoing: true);
             }
@@ -984,32 +988,23 @@ namespace Client_UI_App.Forms
         }
 
         // Nhận VOICE_OFFER — fires on background thread
-        private void OnIncomingVoiceCall(string callerName, string callerUdpPortStr)
+        private void OnIncomingVoiceCall(string callerName, string callerUdpPortStr, string callerIp, int callerTcpPort)
         {
             if (InvokeRequired)
             {
-                BeginInvoke(async () => await HandleIncomingCallAsync(callerName, callerUdpPortStr));
+                BeginInvoke(async () => await HandleIncomingCallAsync(callerName, callerUdpPortStr, callerIp, callerTcpPort));
                 return;
             }
-            _ = HandleIncomingCallAsync(callerName, callerUdpPortStr);
+            _ = HandleIncomingCallAsync(callerName, callerUdpPortStr, callerIp, callerTcpPort);
         }
 
-        private async Task HandleIncomingCallAsync(string callerName, string callerUdpPortStr)
+        private async Task HandleIncomingCallAsync(string callerName, string callerUdpPortStr, string callerIp, int callerTcpPort)
         {
             var answer = MessageBox.Show(
                 $"📞  Cuộc gọi thoại từ  {callerName}\n\nBạn có muốn trả lời không?",
                 "Cuộc gọi đến",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question);
-
-            // Tìm IP:Port TCP của caller để gửi answer/reject về
-            int dirPort = await DirectoryService.GetDirectoryPortAsync();
-            var (found, ipPort) = await DirectoryService.GetUserAsync(dirPort, callerName);
-            if (!found) { SetStatus("Không tìm thấy IP người gọi.", Color.OrangeRed); return; }
-
-            string[] pp = ipPort.Split(':');
-            if (pp.Length != 2 || !int.TryParse(pp[1], out int callerTcpPort)) return;
-            string callerIp = pp[0];
 
             if (answer != DialogResult.Yes)
             {
@@ -1179,7 +1174,7 @@ namespace Client_UI_App.Forms
                 _videoCaptureService = TryStartCamera();
 
                 await P2PChatService.SendVoiceSignalAsync(_peerIp, _peerPort,
-                    $"VIDEO_OFFER|{_username}|{_activeVideoCall.AudioLocalPort}|{_activeVideoCall.VideoLocalPort}");
+                    $"VIDEO_OFFER|{_username}|{_activeVideoCall.AudioLocalPort}|{_activeVideoCall.VideoLocalPort}|{P2PListenerService.ListeningPort}");
 
                 ShowVideoCallForm(_peerName, isOutgoing: true);
             }
@@ -1284,31 +1279,23 @@ namespace Client_UI_App.Forms
         }
 
         // Nhận VIDEO_OFFER từ peer
-        private void OnIncomingVideoCall(string callerName, string callerAudioPortStr, string callerVideoPortStr)
+        private void OnIncomingVideoCall(string callerName, string callerAudioPortStr, string callerVideoPortStr, string callerIp, int callerTcpPort)
         {
             if (InvokeRequired)
             {
-                BeginInvoke(async () => await HandleIncomingVideoCallAsync(callerName, callerAudioPortStr, callerVideoPortStr));
+                BeginInvoke(async () => await HandleIncomingVideoCallAsync(callerName, callerAudioPortStr, callerVideoPortStr, callerIp, callerTcpPort));
                 return;
             }
-            _ = HandleIncomingVideoCallAsync(callerName, callerAudioPortStr, callerVideoPortStr);
+            _ = HandleIncomingVideoCallAsync(callerName, callerAudioPortStr, callerVideoPortStr, callerIp, callerTcpPort);
         }
 
-        private async Task HandleIncomingVideoCallAsync(string callerName, string callerAudioPortStr, string callerVideoPortStr)
+        private async Task HandleIncomingVideoCallAsync(string callerName, string callerAudioPortStr, string callerVideoPortStr, string callerIp, int callerTcpPort)
         {
             var answer = MessageBox.Show(
                 $"📹  Video call từ  {callerName}\n\nBạn có muốn trả lời không?",
                 "Video call đến",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question);
-
-            int dirPort = await DirectoryService.GetDirectoryPortAsync();
-            var (found, ipPort) = await DirectoryService.GetUserAsync(dirPort, callerName);
-            if (!found) { SetStatus("Không tìm thấy IP người gọi.", Color.OrangeRed); return; }
-
-            string[] pp = ipPort.Split(':');
-            if (pp.Length != 2 || !int.TryParse(pp[1], out int callerTcpPort)) return;
-            string callerIp = pp[0];
 
             if (answer != DialogResult.Yes)
             {
