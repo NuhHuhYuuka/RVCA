@@ -15,6 +15,26 @@
 
 ---
 
+## NuGet Packages
+
+`dotnet restore` (hoặc `dotnet build`) sẽ tải tự động — không cần cài tay. Bảng dưới liệt kê để tham khảo:
+
+| Package | Version | Dùng trong | Mục đích |
+|---|---|---|---|
+| `NAudio` | 2.3.0 | Client_UI_App, Bot | Capture / playback âm thanh (MME) |
+| `Concentus` | 2.2.2 | Client_UI_App, Bot | Codec Opus thuần C# (không cần native DLL) |
+| `AForge.Video.DirectShow` | 2.2.5 | Client_UI_App | Capture webcam qua DirectShow (video call) |
+| `Microsoft.Data.Sqlite` | 10.0.7 | Server_Directory, SecurityData_Module | Lưu tài khoản người dùng (`Auth.db`) |
+| `Whisper.net` | 1.7.4 | Bot | Speech-to-text tiếng Việt (local) |
+| `Whisper.net.Runtime` | 1.7.4 | Bot | Native runtime cho Whisper.net |
+| `System.Windows.Extensions` | 10.0.5 | Bot | Hỗ trợ API Windows cho console app |
+
+> **Lưu ý Whisper:** Bot cần file model `ggml-base.bin` (khoảng 142 MB).
+> Tải tại: <https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin>
+> Đặt vào thư mục `Client_Uitichan_Bot/Client_Uitichan_Bot/` trước khi chạy Bot.
+
+---
+
 ## Cấu trúc project
 
 ```
