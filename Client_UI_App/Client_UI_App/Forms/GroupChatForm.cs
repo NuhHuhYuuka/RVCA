@@ -560,7 +560,9 @@ namespace Client_UI_App.Forms
             foreach (string m in _voiceMembers)
                 if (m != _myUsername) _voiceForm.AddMember(m);
 
-            _voiceForm.Show();
+            // FindForm() trả về MainChatForm (top-level owner) — giữ voice form luôn trên cùng
+            _voiceForm.Show(FindForm());
+            _voiceForm.BringToFront();
         }
 
         private void UpdateVoiceButton()
@@ -661,7 +663,8 @@ namespace Client_UI_App.Forms
             foreach (string m in _videoMembers)
                 if (m != _myUsername) _videoForm.AddPeerTile(m);
 
-            _videoForm.Show();
+            _videoForm.Show(FindForm());
+            _videoForm.BringToFront();
         }
 
         // Peer vừa JOIN video channel

@@ -198,11 +198,37 @@ namespace Client_UI_App.Forms
                 AvatarService.SaveUserAvatar(_username, dlg.FileName);
                 LoadMyAvatar();
                 SetStatus("Đã cập nhật ảnh đại diện.", Color.SeaGreen);
+                _ = BroadcastAvatarToAllPeersAsync();
             }
             catch (Exception ex)
             {
                 SetStatus($"Lỗi cập nhật avatar: {ex.Message}", Color.Crimson);
             }
+        }
+
+        // Gửi avatar mới tới tất cả user đang online (fire-and-forget)
+        private async Task BroadcastAvatarToAllPeersAsync()
+        {
+            var targets = _userList.ToList();
+            int sent = 0;
+            foreach (string user in targets)
+            {
+                if (user == _username || user == "UitiChan") continue;
+                try
+                {
+                    int dirPort = await DirectoryService.GetDirectoryPortAsync();
+                    var (found, ipPort) = await DirectoryService.GetUserAsync(dirPort, user);
+                    if (!found || string.IsNullOrEmpty(ipPort)) continue;
+
+                    string[] parts = ipPort.Split(':');
+                    if (parts.Length < 2 || !int.TryParse(parts[1], out int port)) continue;
+
+                    await P2PChatService.SendAvatarAsync(parts[0], port, _username);
+                    sent++;
+                }
+                catch { /* user offline hoặc lỗi mạng — bỏ qua */ }
+            }
+            _ = sent; // fire-and-forget, không cần thông báo thêm
         }
 
         // ══════════════════════════════════════════════════════════════
@@ -311,14 +337,22 @@ namespace Client_UI_App.Forms
             }
         }
 
-        // Tải toàn bộ session của peer vào RTB
+        // Tải toàn bộ session của peer vào RTB (kể cả ảnh đã nhận)
         private void LoadSessionToRtb(string peer)
         {
             rtbChat.Clear();
             if (!_chatSessions.TryGetValue(peer, out var session)) return;
             rtbChat.SuspendLayout();
             foreach (var (ts, text, color) in session)
-                AppendEntryToRtb(ts, text, color);
+            {
+                if (text.StartsWith("[IMAGE:") && text.EndsWith("]"))
+                {
+                    string imgPath = text[7..^1];
+                    if (File.Exists(imgPath)) AppendImageToRtb(imgPath);
+                }
+                else
+                    AppendEntryToRtb(ts, text, color);
+            }
             rtbChat.ResumeLayout();
         }
 
@@ -382,10 +416,25 @@ namespace Client_UI_App.Forms
         {
             AddMessage(sender, $"📁  {sender} gửi \"{fileName}\"  →  {savePath}",
                        Color.FromArgb(255, 180, 50));
-            if (sender == _currentChatPeer && IsImageFile(fileName))
+            if (IsImageFile(fileName))
+                AddImageToSession(sender, savePath);
+        }
+
+        // Lưu đường dẫn ảnh vào session và render ngay nếu đang xem peer đó
+        private void AddImageToSession(string peer, string imagePath)
+        {
+            if (!_chatSessions.TryGetValue(peer, out var session))
             {
-                if (InvokeRequired) Invoke(() => AppendImageToRtb(savePath));
-                else AppendImageToRtb(savePath);
+                session = new List<(string, string, Color)>();
+                _chatSessions[peer] = session;
+            }
+            // Marker đặc biệt — LoadSessionToRtb sẽ detect và render ảnh
+            session.Add(("", $"[IMAGE:{imagePath}]", Color.Transparent));
+
+            if (peer == _currentChatPeer)
+            {
+                if (InvokeRequired) Invoke(() => AppendImageToRtb(imagePath));
+                else AppendImageToRtb(imagePath);
             }
         }
 
@@ -395,31 +444,45 @@ namespace Client_UI_App.Forms
             return ext is ".png" or ".jpg" or ".jpeg" or ".gif" or ".bmp" or ".webp";
         }
 
+        // Nhúng ảnh trực tiếp vào RTF bằng \pngblip — không dùng Clipboard để tránh race condition
         private void AppendImageToRtb(string imagePath)
         {
             try
             {
-                // Đọc bytes vào RAM trước — tránh GDI+ file lock và lỗi "A generic error in GDI+"
+                if (!File.Exists(imagePath)) return;
+
                 byte[] raw = File.ReadAllBytes(imagePath);
                 using var ms   = new MemoryStream(raw);
                 using var orig = Image.FromStream(ms);
-                int w = Math.Min(orig.Width, 220);
+
+                const int MaxW = 300;
+                int w = Math.Min(orig.Width, MaxW);
                 int h = orig.Width > 0 ? (int)(orig.Height * ((double)w / orig.Width)) : 120;
                 if (w <= 0 || h <= 0) return;
+
+                // Tạo thumbnail
                 using var thumb = new Bitmap(w, h);
                 using (var g = Graphics.FromImage(thumb))
                 {
                     g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
                     g.DrawImage(orig, 0, 0, w, h);
                 }
+
+                // Encode sang PNG bytes rồi hex — nhúng thẳng vào RTF \pngblip
+                using var pngMs = new MemoryStream();
+                thumb.Save(pngMs, System.Drawing.Imaging.ImageFormat.Png);
+                string hex = Convert.ToHexString(pngMs.ToArray());
+
+                // \picwgoal / \pichgoal tính theo twips (1 px ≈ 15 twips ở 96 DPI)
+                int wTwips = w * 15;
+                int hTwips = h * 15;
+                string rtf = $@"{{\rtf1 {{\pict\pngblip\picwgoal{wTwips}\pichgoal{hTwips} {hex}}}\par}}";
+
                 bool wasReadOnly = rtbChat.ReadOnly;
                 rtbChat.ReadOnly = false;
                 rtbChat.SelectionStart = rtbChat.TextLength;
-                Clipboard.SetImage(thumb);
-                rtbChat.Paste();
-                rtbChat.AppendText("\n");
+                rtbChat.SelectedRtf = rtf;
                 rtbChat.ReadOnly = wasReadOnly;
-                Clipboard.Clear();
                 rtbChat.ScrollToCaret();
             }
             catch { }
