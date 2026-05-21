@@ -35,7 +35,11 @@ int p2pPort = 5555;
 int activeDirectoryPort = 0; // Biến lưu trữ cổng của Server Danh bạ để dùng cho lúc LOGOUT
 string aesSecretKey = "LTMCB_Secret_Key_2026"; // Chìa khóa E2EE chung cho cả nhóm
 string serverIp    = Environment.GetEnvironmentVariable("SERVER_IP") ?? "127.0.0.1";
-string botPublicIp = Environment.GetEnvironmentVariable("BOT_IP")    ?? serverIp;
+string botPublicIp = Environment.GetEnvironmentVariable("BOT_IP")    ?? await DetectBotIpAsync();
+
+Console.ForegroundColor = ConsoleColor.Cyan;
+Console.WriteLine($"[INFO] Bot sẽ đăng ký địa chỉ: {botPublicIp}:{p2pPort}");
+Console.ResetColor();
 
 // Đăng ký sự kiện bắt buộc gửi LOGOUT khi người dùng bấm dấu X tắt Console
 AppDomain.CurrentDomain.ProcessExit += (sender, eventArgs) => SendLogoutSignal();
@@ -1147,6 +1151,74 @@ static async Task<string> SendDirectoryCommandAsync(int dirPort, string command)
     using StreamWriter  writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
     await writer.WriteLineAsync(command);
     return await reader.ReadLineAsync() ?? string.Empty;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  IP Auto-Detection — ưu tiên: Azure IMDS → External service → LAN IP
+//
+//  Lý do 3 lớp:
+//    Azure IMDS  : chạy trên Azure VM → trả về public IP của VM, rất nhanh (< 1ms)
+//    api.ipify.org: cloud khác (GCP, DigitalOcean, AWS EC2) hoặc VPS bất kỳ
+//    LAN IP      : fallback cho môi trường dev local (tất cả máy cùng LAN)
+// ══════════════════════════════════════════════════════════════════════
+static async Task<string> DetectBotIpAsync()
+{
+    // Lớp 1: Azure IMDS (chỉ hoạt động trên Azure VM, timeout 1s)
+    try
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(1) };
+        http.DefaultRequestHeaders.Add("Metadata", "true");
+        string azureIp = await http.GetStringAsync(
+            "http://169.254.169.254/metadata/instance/network/interface/0/ipv4/ipAddress/0/publicIpAddress" +
+            "?api-version=2021-02-01&format=text");
+        if (!string.IsNullOrWhiteSpace(azureIp) && azureIp.Trim() != "")
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"[IP] Azure public IP: {azureIp.Trim()}");
+            Console.ResetColor();
+            return azureIp.Trim();
+        }
+    }
+    catch { /* không phải Azure VM — bỏ qua */ }
+
+    // Lớp 2: External IP service (VPS/cloud khác, timeout 5s)
+    string[] ipServices = ["https://api.ipify.org", "https://checkip.amazonaws.com", "https://icanhazip.com"];
+    foreach (string svc in ipServices)
+    {
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            string externalIp = (await http.GetStringAsync(svc)).Trim();
+            if (!string.IsNullOrWhiteSpace(externalIp) && System.Net.IPAddress.TryParse(externalIp, out _))
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"[IP] External IP ({svc}): {externalIp}");
+                Console.ResetColor();
+                return externalIp;
+            }
+        }
+        catch { }
+    }
+
+    // Lớp 3: LAN IP (dev local — tất cả máy cùng mạng nội bộ)
+    string lanIp = GetLocalLanIp();
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine($"[IP] Dùng LAN IP (không có internet hoặc dev local): {lanIp}");
+    Console.ResetColor();
+    return lanIp;
+}
+
+static string GetLocalLanIp()
+{
+    try
+    {
+        using var socket = new System.Net.Sockets.Socket(
+            System.Net.Sockets.AddressFamily.InterNetwork,
+            System.Net.Sockets.SocketType.Dgram, 0);
+        socket.Connect("8.8.8.8", 65530);
+        return ((System.Net.IPEndPoint)socket.LocalEndPoint!).Address.ToString();
+    }
+    catch { return "127.0.0.1"; }
 }
 
 // ══════════════════════════════════════════════════════════════════════
