@@ -93,6 +93,9 @@ namespace Client_UI_App.Forms
             P2PListenerService.MessageReceived += OnIncomingMessage;
             P2PListenerService.FileReceived    += OnIncomingFile;
 
+            // Avatar exchange
+            P2PListenerService.AvatarReceived    += OnAvatarReceived;
+
             // Typing + voice signaling events
             P2PListenerService.TypingReceived    += OnPeerTyping;
             P2PListenerService.IncomingVoiceCall += OnIncomingVoiceCall;
@@ -173,7 +176,9 @@ namespace Client_UI_App.Forms
                 bmp = AvatarService.LoadBitmap(AvatarService.BotAvatarPath)
                       ?? AvatarService.CreateInitialsBitmap("U", 34);
             else
-                bmp = AvatarService.CreateInitialsBitmap(peerName, 34);
+                // Thử load từ cache local (đã nhận qua AVATAR_PUSH) trước khi dùng initials
+                bmp = AvatarService.LoadBitmap(AvatarService.GetUserAvatarPath(peerName))
+                      ?? AvatarService.CreateInitialsBitmap(peerName, 34);
 
             var old = picPeerAvatar.Image;
             picPeerAvatar.Image = bmp;
@@ -362,6 +367,14 @@ namespace Client_UI_App.Forms
         //  INCOMING MESSAGES (từ P2PListenerService)
         // ══════════════════════════════════════════════════════════════
 
+        // Nhận avatar từ peer → reload nếu đang xem peer đó
+        private void OnAvatarReceived(string username)
+        {
+            if (username != _currentChatPeer) return;
+            if (InvokeRequired) { Invoke(() => OnAvatarReceived(username)); return; }
+            LoadPeerAvatar(username);
+        }
+
         private void OnIncomingMessage(string sender, string message)
             => AddMessage(sender, $"{sender}: {message}", Color.FromArgb(30, 180, 100));
 
@@ -440,12 +453,6 @@ namespace Client_UI_App.Forms
 
             try
             {
-                if (selected == "UitiChan")
-                {
-                    _peerIp   = "127.0.0.1";
-                    _peerPort = 5555;
-                }
-                else
                 {
                     int dirPort = await DirectoryService.GetDirectoryPortAsync();
                     var (found, ipPort) = await DirectoryService.GetUserAsync(dirPort, selected);
@@ -492,6 +499,10 @@ namespace Client_UI_App.Forms
                 string modeLabel = _isBotPeer ? "Bot AI" : $"{_peerIp}:{_peerPort}";
                 SetPeerInfo($"● {selected}  ({modeLabel})", clrConnected);
                 SetStatus($"Sẵn sàng chat với {selected}", Color.SeaGreen);
+
+                // Gửi avatar của mình tới peer ngầm (không chờ kết quả)
+                if (!_isBotPeer)
+                    _ = P2PChatService.SendAvatarAsync(_peerIp, _peerPort, _username);
 
                 // Không cho phép tự gọi cho chính mình
                 bool isSelf = selected == _username;
@@ -918,9 +929,9 @@ namespace Client_UI_App.Forms
                 _callPeer   = "UitiChan";
                 int localUdpPort = _activecall.PrepareUdp();
 
-                // Kết nối TCP tới bot (port 5555)
+                // Kết nối TCP tới bot (dùng IP/port từ Directory Server)
                 var botTcp    = new System.Net.Sockets.TcpClient();
-                await botTcp.ConnectAsync("127.0.0.1", 5555);
+                await botTcp.ConnectAsync(_peerIp, _peerPort);
                 var botStream = botTcp.GetStream();
                 var botWriter = new StreamWriter(botStream, new System.Text.UTF8Encoding(false)) { AutoFlush = true };
                 var botReader = new StreamReader(botStream, System.Text.Encoding.UTF8);
@@ -939,7 +950,7 @@ namespace Client_UI_App.Forms
                 }
 
                 int botUdpPort = int.Parse(acceptLine.Split('|')[1]);
-                _activecall.SetRemoteEndpoint("127.0.0.1", botUdpPort);
+                _activecall.SetRemoteEndpoint(_peerIp, botUdpPort);
 
                 // Lưu lại để cleanup khi hang up
                 _botCallTcp    = botTcp;
@@ -1203,7 +1214,7 @@ namespace Client_UI_App.Forms
                 _videoCaptureService = TryStartCamera();
 
                 var botTcp    = new System.Net.Sockets.TcpClient();
-                await botTcp.ConnectAsync("127.0.0.1", 5555);
+                await botTcp.ConnectAsync(_peerIp, _peerPort);
                 var botStream = botTcp.GetStream();
                 var botWriter = new StreamWriter(botStream, new System.Text.UTF8Encoding(false)) { AutoFlush = true };
                 var botReader = new StreamReader(botStream, System.Text.Encoding.UTF8);
@@ -1231,7 +1242,7 @@ namespace Client_UI_App.Forms
                     return;
                 }
 
-                _activeVideoCall.SetRemoteEndpoint("127.0.0.1", botAudio, botVideo);
+                _activeVideoCall.SetRemoteEndpoint(_peerIp, botAudio, botVideo);
                 _botCallTcp    = botTcp;
                 _botCallWriter = botWriter;
 
@@ -1469,6 +1480,7 @@ namespace Client_UI_App.Forms
             // Hủy đăng ký events
             P2PListenerService.MessageReceived   -= OnIncomingMessage;
             P2PListenerService.FileReceived      -= OnIncomingFile;
+            P2PListenerService.AvatarReceived    -= OnAvatarReceived;
             P2PListenerService.TypingReceived    -= OnPeerTyping;
             P2PListenerService.IncomingVoiceCall -= OnIncomingVoiceCall;
             _peerTypingClearTimer?.Dispose();

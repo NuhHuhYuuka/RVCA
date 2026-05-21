@@ -109,6 +109,28 @@ namespace Client_UI_App.Services
             await Task.Delay(200); // Đảm bảo tất cả packet bay đi
         }
 
+        // ── Gửi avatar của mình tới peer (fire-and-forget, lỗi im lặng) ──
+        public static async Task SendAvatarAsync(string peerIp, int peerPort, string username)
+        {
+            string avatarPath = AvatarService.GetUserAvatarPath(username);
+            if (string.IsNullOrEmpty(avatarPath)) return;
+
+            try
+            {
+                byte[] pngBytes  = File.ReadAllBytes(avatarPath);
+                string base64Png = Convert.ToBase64String(pngBytes);
+
+                using TcpClient client = new();
+                client.SendTimeout = 5_000;
+                await client.ConnectAsync(peerIp, peerPort);
+                await using NetworkStream stream = client.GetStream();
+                await using StreamWriter  writer = new(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+                await writer.WriteLineAsync($"AVATAR_PUSH|{username}|{base64Png}");
+                await Task.Delay(100);
+            }
+            catch { /* Peer offline hoặc lỗi — bỏ qua */ }
+        }
+
         // ── Gửi 1 dòng TCP cho voice signaling (VOICE_OFFER/ANSWER/REJECT/HANGUP) ──
         public static async Task SendVoiceSignalAsync(string ip, int port, string line)
         {

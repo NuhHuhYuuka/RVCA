@@ -45,6 +45,14 @@ namespace Client_UI_App.Services
             return dest;
         }
 
+        // Lưu avatar nhận từ peer (raw PNG bytes, không cần resize thêm)
+        public static void SaveUserAvatarFromBytes(string username, byte[] pngBytes)
+        {
+            Directory.CreateDirectory(AvatarDir);
+            string dest = Path.Combine(AvatarDir, $"{username}.png");
+            File.WriteAllBytes(dest, pngBytes);
+        }
+
         // Load Bitmap từ file (trả null nếu không có hoặc lỗi)
         // Dùng bản sao in-memory để tránh lock file — cho phép SaveUserAvatar ghi đè sau này
         public static Bitmap? LoadBitmap(string path)

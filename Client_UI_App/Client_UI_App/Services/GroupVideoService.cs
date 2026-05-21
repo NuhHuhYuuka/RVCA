@@ -273,8 +273,11 @@ namespace Client_UI_App.Services
             {
                 try
                 {
-                    var    result = await _audioUdp!.ReceiveAsync(ct);
-                    string key    = result.RemoteEndPoint.ToString();
+                    var result = await _audioUdp!.ReceiveAsync(ct);
+                    var    rEp  = result.RemoteEndPoint;
+                    var    addr = rEp.Address.IsIPv4MappedToIPv6
+                                    ? rEp.Address.MapToIPv4() : rEp.Address;
+                    string key  = $"{addr}:{rEp.Port}";
 
                     PeerState? peer = null;
                     lock (_lock)
@@ -314,8 +317,11 @@ namespace Client_UI_App.Services
             {
                 try
                 {
-                    var    result = await _videoUdp!.ReceiveAsync(ct);
-                    string key    = result.RemoteEndPoint.ToString();
+                    var result = await _videoUdp!.ReceiveAsync(ct);
+                    var    rEp  = result.RemoteEndPoint;
+                    var    addr = rEp.Address.IsIPv4MappedToIPv6
+                                    ? rEp.Address.MapToIPv4() : rEp.Address;
+                    string key  = $"{addr}:{rEp.Port}";
 
                     string? username = null;
                     lock (_lock) { _videoKey.TryGetValue(key, out username); }

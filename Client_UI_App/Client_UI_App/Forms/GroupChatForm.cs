@@ -23,6 +23,9 @@ namespace Client_UI_App.Forms
         private GroupVoiceService?  _voiceService;
         private readonly HashSet<string> _voiceMembers = new();
 
+        // ── Voice channel form ────────────────────────────────────────
+        private GroupVoiceForm?      _voiceForm;
+
         // ── Video channel ─────────────────────────────────────────────
         private GroupVideoService?   _videoService;
         private VideoCaptureService? _videoCapture;
@@ -72,6 +75,8 @@ namespace Client_UI_App.Forms
             P2PListenerService.GroupVideoReplied    -= OnGroupVideoReplied;
             P2PListenerService.GroupVideoLeft       -= OnGroupVideoLeft;
 
+            _voiceForm?.Close();
+            _voiceForm = null;
             _voiceService?.Stop();
             _voiceService = null;
 
@@ -324,8 +329,20 @@ namespace Client_UI_App.Forms
         {
             try
             {
+                // Tra cứu IP thật của bot từ Directory Server
+                int dirPort = await DirectoryService.GetDirectoryPortAsync();
+                var (botFound, ipPort) = await DirectoryService.GetUserAsync(dirPort, "UitiChan");
+                if (!botFound)
+                {
+                    SetStatus("UitiChan không online.", Color.OrangeRed);
+                    return;
+                }
+                string[] botParts = ipPort.Split(':');
+                string   botIp    = botParts[0];
+                int      botPort  = int.TryParse(botParts.Length > 1 ? botParts[1] : "0", out int bp) ? bp : 5555;
+
                 SetStatus("Đang chờ UitiChan trả lời...", Color.DodgerBlue);
-                var (textResp, _) = await P2PChatService.SendMessageAsync("127.0.0.1", 5555, message);
+                var (textResp, _) = await P2PChatService.SendMessageAsync(botIp, botPort, message);
 
                 // Hiển thị ngay cho người gọi
                 AppendChat($"UitiChan: {textResp}", Color.FromArgb(200, 80, 130));
@@ -426,6 +443,8 @@ namespace Client_UI_App.Forms
                 UpdateVoiceButton();
                 AppendChat($"[Voice] Bạn đã tham gia voice channel", Color.FromArgb(0, 200, 150));
 
+                ShowVoiceForm();
+
                 var endpoints = await ResolveOnlineMembersAsync();
                 if (endpoints.Count > 0)
                     await GroupChatService.BroadcastVoiceJoinAsync(
@@ -450,6 +469,8 @@ namespace Client_UI_App.Forms
             btnVoice.Enabled = false;
             try
             {
+                _voiceForm?.Close();
+                _voiceForm = null;
                 _voiceService?.Stop();
                 _voiceService = null;
                 _voiceMembers.Clear();
@@ -480,6 +501,7 @@ namespace Client_UI_App.Forms
             _voiceMembers.Add(peerName);
             UpdateVoiceButton();
             AppendChat($"[Voice] {peerName} đã tham gia voice channel", Color.FromArgb(0, 200, 150));
+            _voiceForm?.AddMember(peerName);
 
             // Nếu mình đang trong voice channel → thêm peer và reply UDP port
             if (_voiceService != null)
@@ -503,6 +525,7 @@ namespace Client_UI_App.Forms
             _voiceMembers.Add(peerName);
             UpdateVoiceButton();
             AppendChat($"[Voice] {peerName} đang trong voice channel", Color.FromArgb(0, 200, 150));
+            _voiceForm?.AddMember(peerName);
 
             _voiceService?.AddPeer(peerName, peerIp, peerUdpPort);
         }
@@ -515,6 +538,7 @@ namespace Client_UI_App.Forms
 
             _voiceMembers.Remove(peerName);
             _voiceService?.RemovePeer(peerName);
+            _voiceForm?.RemoveMember(peerName);
             UpdateVoiceButton();
             AppendChat($"[Voice] {peerName} đã rời voice channel", Color.FromArgb(200, 100, 100));
 
@@ -522,6 +546,21 @@ namespace Client_UI_App.Forms
                 SetStatus($"{_members.Count} thành viên", Color.SeaGreen);
             else
                 SetStatus($"🎙️ Voice  ({_voiceMembers.Count} người)", Color.FromArgb(0, 200, 150));
+        }
+
+        private void ShowVoiceForm()
+        {
+            if (_voiceService == null) return;
+            if (_voiceForm != null && !_voiceForm.IsDisposed) { _voiceForm.BringToFront(); return; }
+
+            _voiceForm = new GroupVoiceForm(_myUsername, _voiceService);
+            _voiceForm.LeaveRequested += async () => await LeaveVoiceAsync();
+            _voiceForm.FormClosed     += (_, _) => { _voiceForm = null; };
+
+            foreach (string m in _voiceMembers)
+                if (m != _myUsername) _voiceForm.AddMember(m);
+
+            _voiceForm.Show();
         }
 
         private void UpdateVoiceButton()

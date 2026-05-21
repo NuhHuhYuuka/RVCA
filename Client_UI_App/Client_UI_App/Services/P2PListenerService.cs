@@ -43,6 +43,9 @@ namespace Client_UI_App.Services
         // Typing indicator: (senderName)
         public static event Action<string>?         TypingReceived;
 
+        // Avatar nhận từ peer: (username)
+        public static event Action<string>?         AvatarReceived;
+
         // Group voice channel: (groupId, username, senderIp, udpPort, senderTcpPort)
         public static event Action<string, string, string, int, int>? GroupVoiceJoined;
         // Group voice reply: (groupId, username, senderIp, udpPort)
@@ -161,6 +164,21 @@ namespace Client_UI_App.Services
                     string[] parts = firstLine.Split('|', 2);
                     if (parts.Length == 2)
                         TypingReceived?.Invoke(parts[1]);
+                }
+                else if (firstLine.StartsWith("AVATAR_PUSH|"))
+                {
+                    // AVATAR_PUSH|username|base64PNG
+                    string[] parts = firstLine.Split('|', 3);
+                    if (parts.Length == 3)
+                    {
+                        try
+                        {
+                            byte[] pngBytes = Convert.FromBase64String(parts[2]);
+                            AvatarService.SaveUserAvatarFromBytes(parts[1], pngBytes);
+                            AvatarReceived?.Invoke(parts[1]);
+                        }
+                        catch { }
+                    }
                 }
                 else if (firstLine.StartsWith("GROUP_VOICE_JOIN|"))
                 {

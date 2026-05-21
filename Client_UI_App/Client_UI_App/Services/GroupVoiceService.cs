@@ -240,7 +240,10 @@ namespace Client_UI_App.Services
                 try
                 {
                     var result = await _udp!.ReceiveAsync(ct);
-                    string key = result.RemoteEndPoint.ToString();
+                    var    rEp  = result.RemoteEndPoint;
+                    var    addr = rEp.Address.IsIPv4MappedToIPv6
+                                    ? rEp.Address.MapToIPv4() : rEp.Address;
+                    string key  = $"{addr}:{rEp.Port}";
 
                     PeerState? peer;
                     lock (_peersLock) { _peers.TryGetValue(key, out peer); }
