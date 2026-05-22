@@ -315,22 +315,26 @@ static async Task HandleBotRelayRequestAsync(string srvIp, string fromUser, stri
 // Gửi VOICE_ACCEPT qua relay → chạy voice loop với idle-timeout 90s
 static async Task HandleBotVoiceOfferRelayAsync(string srvIp, string fromUser, string senderIp, string content)
 {
-    // content: VOICE_OFFER|clientName|clientUdpPort
+    // content: VOICE_OFFER|clientName|clientUdpPort[|clientLanIp]
     string[] parts = content.Split('|');
     if (parts.Length < 3) return;
-    string clientName = parts[1];
+    string clientName  = parts[1];
     if (!int.TryParse(parts[2], out int clientUdpPort)) return;
+    // Prefer embedded LAN IP (same-LAN scenario); fall back to relay senderIp
+    string clientIp = parts.Length >= 4 && !string.IsNullOrWhiteSpace(parts[3])
+        ? parts[3] : senderIp;
 
     Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine($"[VOICE RELAY] {clientName} bắt đầu voice call qua relay (UDP:{clientUdpPort})");
+    Console.WriteLine($"[VOICE RELAY] {clientName} bắt đầu voice call qua relay (UDP:{clientUdpPort} IP:{clientIp})");
     Console.ResetColor();
 
-    using var udpRecv = new UdpClient(0);
-    int botUdpPort    = ((IPEndPoint)udpRecv.Client.LocalEndPoint!).Port;
-    using var udpSend = new UdpClient();
-    var clientEp      = new IPEndPoint(IPAddress.Parse(senderIp), clientUdpPort);
+    using var udpRecv  = new UdpClient(0);
+    int    botUdpPort  = ((IPEndPoint)udpRecv.Client.LocalEndPoint!).Port;
+    using var udpSend  = new UdpClient();
+    string botLanIp    = GetLocalLanIp();
+    var    clientEp    = new IPEndPoint(IPAddress.Parse(clientIp), clientUdpPort);
 
-    // Gửi VOICE_ACCEPT qua relay về cả 2 Directory Server
+    // Gửi VOICE_ACCEPT|botLanIp|botUdpPort qua relay về cả 2 Directory Server
     int[] dirPorts = { 8888, 8889 };
     await Task.WhenAll(dirPorts.Select(async port =>
     {
@@ -344,7 +348,7 @@ static async Task HandleBotVoiceOfferRelayAsync(string srvIp, string fromUser, s
             stream.WriteTimeout = 4000;
             using var r = new StreamReader(stream, new UTF8Encoding(false));
             using var w = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
-            await w.WriteLineAsync($"RELAY|UitiChan|{fromUser}|VOICE_ACCEPT|{botUdpPort}");
+            await w.WriteLineAsync($"RELAY|UitiChan|{fromUser}|VOICE_ACCEPT|{botLanIp}|{botUdpPort}");
             _ = await r.ReadLineAsync(); // consume RELAY_OK
         }
         catch { }
@@ -381,7 +385,16 @@ static async Task HandleBotVoiceOfferRelayAsync(string srvIp, string fromUser, s
                 UdpReceiveResult recvResult;
                 try { recvResult = await recvTask; }
                 catch (OperationCanceledException) { break; }
-                catch { break; }
+                catch (SocketException sx)
+                {
+                    // ICMP port-unreachable (10054) or similar — start a fresh recv and continue
+                    Console.ForegroundColor = ConsoleColor.DarkYellow;
+                    Console.WriteLine($"[VOICE RELAY UDP] SocketException {sx.SocketErrorCode} — retrying recv");
+                    Console.ResetColor();
+                    recvTask = udpRecv.ReceiveAsync(cts.Token).AsTask();
+                    continue;
+                }
+                catch (Exception ex) { Console.WriteLine($"[VOICE RELAY UDP ERR] {ex.Message}"); break; }
                 recvTask   = udpRecv.ReceiveAsync(cts.Token).AsTask();
                 lastPacket = DateTime.UtcNow;
                 clientEp   = recvResult.RemoteEndPoint;
@@ -442,7 +455,7 @@ static async Task HandleBotVoiceOfferRelayAsync(string srvIp, string fromUser, s
             }
         }
         catch (OperationCanceledException) { break; }
-        catch { break; }
+        catch (Exception ex) { Console.WriteLine($"[VOICE RELAY LOOP ERR] {ex.Message}"); break; }
     }
 
     Console.ForegroundColor = ConsoleColor.Yellow;

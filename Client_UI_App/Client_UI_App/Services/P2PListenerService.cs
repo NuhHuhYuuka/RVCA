@@ -206,10 +206,13 @@ namespace Client_UI_App.Services
             }
             else if (line.StartsWith("VOICE_ACCEPT|"))
             {
-                // VOICE_ACCEPT|botUdpPort — bot reply via relay for bot voice call fallback
-                string[] p = line.Split('|', 2);
-                if (p.Length == 2 && int.TryParse(p[1], out int botPort))
-                    P2PChatService.CompleteBotVoiceAccept(senderIp, botPort);
+                // VOICE_ACCEPT|botLanIp|botUdpPort — new format with LAN IP
+                // VOICE_ACCEPT|botUdpPort            — legacy format
+                string[] p = line.Split('|');
+                if (p.Length >= 3 && int.TryParse(p[2], out int botPort))
+                    P2PChatService.CompleteBotVoiceAccept(p[1], botPort);
+                else if (p.Length == 2 && int.TryParse(p[1], out int botPort2))
+                    P2PChatService.CompleteBotVoiceAccept(senderIp, botPort2);
             }
             else if (line.StartsWith("FILE_RELAY|"))
             {
