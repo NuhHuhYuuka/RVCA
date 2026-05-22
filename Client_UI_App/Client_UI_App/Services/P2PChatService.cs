@@ -71,42 +71,61 @@ namespace Client_UI_App.Services
             await Task.Delay(100);
         }
 
-        // ── Gửi file/ảnh đến Client thường (chunked 64KB, SHA-256 verify) ──
+        // ── Gửi file/ảnh đến Client thường (chunked 64KB P2P, relay fallback) ──
         // progress: 0–100 (phần trăm chunk đã gửi)
         public static async Task SendFileToClientAsync(
             string           peerIp,
             int              peerPort,
             string           senderName,
             string           filePath,
-            IProgress<int>?  progress = null)
+            IProgress<int>?  progress = null,
+            string?          peerName = null)
         {
             var    fileInfo    = new FileInfo(filePath);
             const int chunkSize = 64 * 1024;
-            int    totalChunks = (int)Math.Ceiling((double)fileInfo.Length / chunkSize);
             string sha256      = FileTransferService.ComputeSha256(filePath);
             string fileName    = fileInfo.Name;
 
-            using TcpClient client = new();
-            client.SendTimeout = 60_000;
-            await client.ConnectAsync(peerIp, peerPort);
-
-            await using NetworkStream stream = client.GetStream();
-            await using StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
-
-            // Gửi header
-            await writer.WriteLineAsync($"FILE_INIT|{senderName}|{fileName}|{totalChunks}|{sha256}");
-
-            // Gửi từng chunk (lazy — không tải toàn bộ file vào RAM)
-            int idx = 0;
-            foreach (var chunk in FileTransferService.SplitFile(filePath, chunkSize))
+            bool ok = false;
+            try
             {
-                string base64Data = Convert.ToBase64String(chunk.Data);
-                await writer.WriteLineAsync($"FILE_CHUNK|{idx}|{base64Data}");
-                progress?.Report((idx + 1) * 100 / totalChunks);
-                idx++;
-            }
+                using var cts = new CancellationTokenSource(500);
+                using TcpClient client = new();
+                client.SendTimeout = 60_000;
+                await client.ConnectAsync(peerIp, peerPort, cts.Token);
 
-            await Task.Delay(200); // Đảm bảo tất cả packet bay đi
+                await using NetworkStream stream = client.GetStream();
+                await using StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+
+                int totalChunks = (int)Math.Ceiling((double)fileInfo.Length / chunkSize);
+                await writer.WriteLineAsync($"FILE_INIT|{senderName}|{fileName}|{totalChunks}|{sha256}");
+
+                int idx = 0;
+                foreach (var chunk in FileTransferService.SplitFile(filePath, chunkSize))
+                {
+                    string base64Data = Convert.ToBase64String(chunk.Data);
+                    await writer.WriteLineAsync($"FILE_CHUNK|{idx}|{base64Data}");
+                    progress?.Report((idx + 1) * 100 / totalChunks);
+                    idx++;
+                }
+                await Task.Delay(200);
+                ok = true;
+            }
+            catch { }
+
+            if (!ok && peerName != null)
+            {
+                // Relay fallback: toàn bộ file base64 trong 1 relay message
+                byte[] data = File.ReadAllBytes(filePath);
+                string base64All = Convert.ToBase64String(data);
+                await DirectoryService.RelayAsync(senderName, peerName,
+                    $"FILE_RELAY|{senderName}|{fileName}|{sha256}|{base64All}");
+                progress?.Report(100);
+            }
+            else if (!ok)
+            {
+                throw new IOException("Không thể kết nối tới peer để gửi file.");
+            }
         }
 
         // ── Gửi avatar của mình tới peer (fire-and-forget, lỗi im lặng) ──
@@ -148,21 +167,48 @@ namespace Client_UI_App.Services
         }
 
         // ── Gửi text message với relay fallback (khi P2P bị NAT chặn) ──
-        // Thử E2E P2P trước; nếu fail → relay plaintext qua server
+        // Thử E2E P2P trước (timeout 500ms); nếu fail → relay plaintext qua server
         public static async Task SendToClientWithRelayAsync(
             string peerIp, int peerPort,
             string senderName, string peerName,
             string message)
         {
+            bool ok = false;
             try
             {
-                await SendToClientAsync(peerIp, peerPort, senderName, message);
+                using var cts = new CancellationTokenSource(500);
+                using TcpClient client = new();
+                client.SendTimeout    = 5_000;
+                client.ReceiveTimeout = 5_000;
+                await client.ConnectAsync(peerIp, peerPort, cts.Token);
+
+                await using NetworkStream stream = client.GetStream();
+                using StreamReader  reader = new(stream, Encoding.UTF8, leaveOpen: true);
+                await using StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+
+                using var keyEx = new KeyExchangeService();
+                await writer.WriteLineAsync($"E2E_INIT|{senderName}|{keyEx.ExportPublicKey()}");
+
+                string? ack = await reader.ReadLineAsync();
+                if (string.IsNullOrEmpty(ack) || !ack.StartsWith("E2E_INIT_ACK|"))
+                {
+                    await writer.WriteLineAsync($"CHAT|{senderName}|{message}");
+                }
+                else
+                {
+                    string[] ackParts  = ack.Split('|', 3);
+                    string   peerN     = ackParts[1];
+                    byte[]   sessionKey = keyEx.DeriveSessionKeyFromPeer(peerN, ackParts[2]);
+                    var enc = SecurityService.Encrypt(message, sessionKey);
+                    await writer.WriteLineAsync($"CHAT_E2E|{senderName}|{enc.CipherText}|{enc.Nonce}|{enc.Tag}");
+                }
+                await Task.Delay(100);
+                ok = true;
             }
-            catch
-            {
-                // P2P fail → relay qua server (không E2E, nhưng đảm bảo message đến)
+            catch { }
+
+            if (!ok)
                 await DirectoryService.RelayAsync(senderName, peerName, $"CHAT|{senderName}|{message}");
-            }
         }
 
         // ── Gửi voice/video signaling với relay fallback ──────────────
@@ -174,7 +220,7 @@ namespace Client_UI_App.Services
             bool ok = false;
             try
             {
-                using var cts    = new CancellationTokenSource(TimeSpan.FromMilliseconds(2500));
+                using var cts    = new CancellationTokenSource(500);
                 using TcpClient client = new();
                 await client.ConnectAsync(ip, port, cts.Token);
                 await using NetworkStream stream = client.GetStream();

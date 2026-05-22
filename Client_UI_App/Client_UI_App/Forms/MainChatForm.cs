@@ -858,7 +858,7 @@ namespace Client_UI_App.Forms
                 var progress = new Progress<int>(pct =>
                     SetStatus($"Đang gửi \"{fileName}\"... {pct}%", Color.DodgerBlue));
 
-                await P2PChatService.SendFileToClientAsync(_peerIp, _peerPort, _username, filePath, progress);
+                await P2PChatService.SendFileToClientAsync(_peerIp, _peerPort, _username, filePath, progress, _peerName);
                 SetStatus($"Đã gửi \"{fileName}\"", Color.SeaGreen);
             }
             catch (Exception ex)
@@ -1134,7 +1134,7 @@ namespace Client_UI_App.Forms
         }
 
         // Nhận VOICE_ANSWER — caller nhận UDP port của callee → SetRemoteEndpoint → StartAudio
-        private void OnVoiceCallAnswered(string peerName, string answererUdpPortStr)
+        private void OnVoiceCallAnswered(string peerName, string answererUdpPortStr, string answererIp)
         {
             if (_activecall == null || peerName != _callPeer) return;
             try
@@ -1145,7 +1145,9 @@ namespace Client_UI_App.Forms
                     else SetStatus("Signaling: UDP port không hợp lệ.", Color.Crimson);
                     return;
                 }
-                _activecall.SetRemoteEndpoint(_callPeerIp, answererUdpPort);
+                // Use actual remote IP (not stored LAN IP) for cross-network UDP
+                string udpIp = string.IsNullOrEmpty(answererIp) ? _callPeerIp : answererIp;
+                _activecall.SetRemoteEndpoint(udpIp, answererUdpPort);
                 _activecall.StartAudio();
             }
             catch (Exception ex)
@@ -1429,7 +1431,7 @@ namespace Client_UI_App.Forms
         }
 
         // Nhận VIDEO_ANSWER — caller nhận ports của callee
-        private void OnVideoCallAnswered(string peerName, string answererAudioPortStr, string answererVideoPortStr)
+        private void OnVideoCallAnswered(string peerName, string answererAudioPortStr, string answererVideoPortStr, string answererIp)
         {
             if (_activeVideoCall == null || peerName != _videoCallPeer) return;
             try
@@ -1441,7 +1443,8 @@ namespace Client_UI_App.Forms
                     else SetStatus("Signaling: port không hợp lệ.", Color.Crimson);
                     return;
                 }
-                _activeVideoCall.SetRemoteEndpoint(_videoCallPeerIp, aPort, vPort);
+                string udpIp = string.IsNullOrEmpty(answererIp) ? _videoCallPeerIp : answererIp;
+                _activeVideoCall.SetRemoteEndpoint(udpIp, aPort, vPort);
                 _activeVideoCall.Start();
             }
             catch (Exception ex)

@@ -55,8 +55,8 @@ namespace Client_UI_App.Services
 
         // Voice signaling 1:1: (callerName, callerUdpPort, callerIp, callerTcpPort)
         public static event Action<string, string, string, int>? IncomingVoiceCall;
-        // Voice signaling: (peerName, answererUdpPort)
-        public static event Action<string, string>? VoiceCallAnswered;
+        // Voice signaling: (peerName, answererUdpPort, answererIp)
+        public static event Action<string, string, string>? VoiceCallAnswered;
         // Voice signaling: (peerName)
         public static event Action<string>?         VoiceCallRejected;
         // Voice signaling: (peerName)
@@ -64,8 +64,8 @@ namespace Client_UI_App.Services
 
         // Video signaling 1:1: (callerName, callerAudioPort, callerVideoPort, callerIp, callerTcpPort)
         public static event Action<string, string, string, string, int>? IncomingVideoCall;
-        // Video signaling: (peerName, answererAudioPort, answererVideoPort)
-        public static event Action<string, string, string>? VideoCallAnswered;
+        // Video signaling: (peerName, answererAudioPort, answererVideoPort, answererIp)
+        public static event Action<string, string, string, string>? VideoCallAnswered;
         // Video signaling: (peerName)
         public static event Action<string>?                 VideoCallRejected;
         // Video signaling: (peerName)
@@ -118,7 +118,7 @@ namespace Client_UI_App.Services
             else if (line.StartsWith("VOICE_ANSWER|"))
             {
                 string[] p = line.Split('|', 3);
-                if (p.Length == 3) VoiceCallAnswered?.Invoke(p[1], p[2]);
+                if (p.Length == 3) VoiceCallAnswered?.Invoke(p[1], p[2], senderIp);
             }
             else if (line.StartsWith("VOICE_REJECT|"))
             {
@@ -140,7 +140,7 @@ namespace Client_UI_App.Services
             else if (line.StartsWith("VIDEO_ANSWER|"))
             {
                 string[] p = line.Split('|', 4);
-                if (p.Length == 4) VideoCallAnswered?.Invoke(p[1], p[2], p[3]);
+                if (p.Length == 4) VideoCallAnswered?.Invoke(p[1], p[2], p[3], senderIp);
             }
             else if (line.StartsWith("VIDEO_REJECT|"))
             {
@@ -151,6 +151,27 @@ namespace Client_UI_App.Services
             {
                 string[] p = line.Split('|', 2);
                 if (p.Length == 2) VideoCallHungUp?.Invoke(p[1]);
+            }
+            else if (line.StartsWith("FILE_RELAY|"))
+            {
+                // FILE_RELAY|senderName|fileName|sha256|base64Data
+                string[] p = line.Split('|', 5);
+                if (p.Length == 5)
+                {
+                    try
+                    {
+                        byte[] data      = Convert.FromBase64String(p[4]);
+                        string saveDir   = FileTransferService.GetReceiveFolder();
+                        string savePath  = Path.Combine(saveDir, p[2]);
+                        File.WriteAllBytes(savePath, data);
+                        string actualSha = FileTransferService.ComputeSha256(savePath);
+                        if (actualSha.Equals(p[3], StringComparison.OrdinalIgnoreCase))
+                            FileReceived?.Invoke(p[1], p[2], savePath);
+                        else
+                            try { File.Delete(savePath); } catch { }
+                    }
+                    catch { }
+                }
             }
         }
 
@@ -290,7 +311,7 @@ namespace Client_UI_App.Services
                 {
                     string[] parts = firstLine.Split('|', 3);
                     if (parts.Length == 3)
-                        VoiceCallAnswered?.Invoke(parts[1], parts[2]);
+                        VoiceCallAnswered?.Invoke(parts[1], parts[2], remoteIp);
                 }
                 else if (firstLine.StartsWith("VOICE_REJECT|"))
                 {
@@ -316,7 +337,7 @@ namespace Client_UI_App.Services
                     // VIDEO_ANSWER|callerName|audioUdpPort|videoUdpPort
                     string[] parts = firstLine.Split('|', 4);
                     if (parts.Length == 4)
-                        VideoCallAnswered?.Invoke(parts[1], parts[2], parts[3]);
+                        VideoCallAnswered?.Invoke(parts[1], parts[2], parts[3], remoteIp);
                 }
                 else if (firstLine.StartsWith("VIDEO_REJECT|"))
                 {
