@@ -330,6 +330,7 @@ namespace Client_UI_App.Services
             string fileName    = parts[2];
             int    totalChunks = int.Parse(parts[3]);
             string expectedSha = parts[4];
+            if (totalChunks <= 0) return;
 
             string saveFolder = FileTransferService.GetReceiveFolder();
             string savePath   = Path.Combine(saveFolder, fileName);
@@ -359,6 +360,10 @@ namespace Client_UI_App.Services
                 else
                     File.Delete(savePath);
             }
+            else
+            {
+                try { File.Delete(savePath); } catch { }
+            }
         }
 
         // ── Nhận file transfer nhóm (chunked, SHA-256 verify) ────────
@@ -374,6 +379,7 @@ namespace Client_UI_App.Services
             string fileName    = parts[4];
             int    totalChunks = int.Parse(parts[5]);
             string expectedSha = parts[6];
+            if (totalChunks <= 0) return;
 
             string saveFolder = FileTransferService.GetReceiveFolder();
             string savePath   = Path.Combine(saveFolder, fileName);
@@ -401,6 +407,10 @@ namespace Client_UI_App.Services
                     GroupFileReceived?.Invoke(groupId, groupName, senderName, fileName, savePath);
                 else
                     File.Delete(savePath);
+            }
+            else
+            {
+                try { File.Delete(savePath); } catch { }
             }
         }
     }

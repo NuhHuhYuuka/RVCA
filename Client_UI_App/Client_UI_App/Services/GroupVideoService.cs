@@ -333,8 +333,14 @@ namespace Client_UI_App.Services
                     int jpgLen = (data[1] << 24) | (data[2] << 16) | (data[3] << 8) | data[4];
                     if (jpgLen <= 0 || 5 + jpgLen > data.Length) continue;
 
+                    // GDI+ giữ reference tới stream trong lifetime của Bitmap — phải copy
                     Bitmap bmp;
-                    try { using var ms2 = new MemoryStream(data, 5, jpgLen); bmp = new Bitmap(ms2); }
+                    try
+                    {
+                        using var ms2 = new MemoryStream(data, 5, jpgLen);
+                        using var tmp = System.Drawing.Image.FromStream(ms2);
+                        bmp = new Bitmap(tmp);
+                    }
                     catch { continue; }
 
                     FrameReceived?.Invoke(username, bmp);

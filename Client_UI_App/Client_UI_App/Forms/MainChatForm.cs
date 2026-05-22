@@ -844,6 +844,9 @@ namespace Client_UI_App.Forms
 
             AppendChat($"Tôi:  📎 \"{fileName}\"  ({fileSize / 1024.0:F1} KB)", Color.FromArgb(80, 140, 220));
 
+            if (IsImageFile(fileName))
+                AddImageToSession(_currentChatPeer, filePath);
+
             SetButtonSend(false);
             btnSendFile.Enabled = false;
 
