@@ -32,6 +32,7 @@ namespace Client_UI_App.Forms
             pbSpk           = new System.Windows.Forms.ProgressBar();
             btnMute         = new System.Windows.Forms.Button();
             btnToggleCam    = new System.Windows.Forms.Button();
+            btnScreenShare  = new System.Windows.Forms.Button();
             btnHangup       = new System.Windows.Forms.Button();
 
             pnlCaption.SuspendLayout();
@@ -158,6 +159,19 @@ namespace Client_UI_App.Forms
             btnToggleCam.Cursor    = Cursors.Hand;
             btnToggleCam.Click    += btnToggleCam_Click;
 
+            btnScreenShare.Text      = "🖥️  Chia sẻ màn hình";
+            btnScreenShare.Location  = new Point(290, 46);
+            btnScreenShare.Size      = new Size(180, 32);
+            btnScreenShare.Font      = new Font("Segoe UI", 11F);
+            btnScreenShare.BackColor = Color.FromArgb(50, 50, 72);
+            btnScreenShare.ForeColor = clrText;
+            btnScreenShare.FlatStyle = FlatStyle.Flat;
+            btnScreenShare.FlatAppearance.BorderColor        = Color.FromArgb(70, 70, 100);
+            btnScreenShare.FlatAppearance.BorderSize         = 1;
+            btnScreenShare.FlatAppearance.MouseOverBackColor = Color.FromArgb(65, 65, 92);
+            btnScreenShare.Cursor    = Cursors.Hand;
+            btnScreenShare.Click    += btnScreenShare_Click;
+
             btnHangup.Text      = "📵  Cúp máy";
             btnHangup.Location  = new Point(640, 46);
             btnHangup.Size      = new Size(148, 32);
@@ -174,7 +188,7 @@ namespace Client_UI_App.Forms
             {
                 lblPeerName, lblTimer,
                 lblMicIcon, pbMic, lblSpkIcon, pbSpk,
-                btnMute, btnToggleCam, btnHangup
+                btnMute, btnToggleCam, btnScreenShare, btnHangup
             });
 
             // ── pnlLocalOverlay: local camera preview (absolute in pnlVideoArea) ─
@@ -253,6 +267,7 @@ namespace Client_UI_App.Forms
         private System.Windows.Forms.ProgressBar pbSpk;
         private System.Windows.Forms.Button      btnMute;
         private System.Windows.Forms.Button      btnToggleCam;
+        private System.Windows.Forms.Button      btnScreenShare;
         private System.Windows.Forms.Button      btnHangup;
     }
 }

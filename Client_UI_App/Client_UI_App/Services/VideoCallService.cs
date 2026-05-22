@@ -35,6 +35,7 @@ namespace Client_UI_App.Services
         public int AudioLocalPort => Audio.LocalUdpPort;
         public int VideoLocalPort { get; private set; }
         public bool IsMuted { get => Audio.IsMuted; set => Audio.IsMuted = value; }
+        public Size TargetFrameSize { get; set; } = new Size(320, 240);
 
         // Events proxy từ audio + event riêng cho video frame
         public event Action?         CallConnected   { add => Audio.CallConnected   += value; remove => Audio.CallConnected   -= value; }
@@ -56,6 +57,7 @@ namespace Client_UI_App.Services
         {
             Audio.SetRemoteEndpoint(ip, audioPort);
             _videoRemoteEp = new IPEndPoint(IPAddress.Parse(ip), videoPort);
+            try { _videoSend?.Close(); } catch { }
             _videoSend     = new UdpClient();
         }
 
@@ -74,9 +76,9 @@ namespace Client_UI_App.Services
             if (_videoSend == null || _videoRemoteEp == null || _disposed) return;
             try
             {
-                Bitmap src     = bmp.Width == 320 && bmp.Height == 240
+                Bitmap src     = bmp.Size == TargetFrameSize
                     ? bmp
-                    : new Bitmap(bmp, new Size(320, 240));
+                    : new Bitmap(bmp, TargetFrameSize);
 
                 using var ms   = new MemoryStream(16384);
                 using var ep   = new EncoderParameters(1);
@@ -85,7 +87,7 @@ namespace Client_UI_App.Services
                 if (!ReferenceEquals(src, bmp)) src.Dispose();
 
                 byte[] jpg = ms.ToArray();
-                if (jpg.Length > 60000) return; // skip oversized (lỗi encoder)
+                if (jpg.Length > 90000) return; // skip oversized
 
                 // [magic=0x56][len_hi][len_3][len_2][len_lo][jpg...]
                 byte[] pkt = new byte[5 + jpg.Length];

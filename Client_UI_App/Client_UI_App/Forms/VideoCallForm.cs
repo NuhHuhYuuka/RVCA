@@ -15,6 +15,10 @@ namespace Client_UI_App.Forms
         private bool _cameraOn  = true;
         private bool _hangupFired;
 
+        // Screen sharing
+        private ScreenCaptureService? _screenCapture;
+        private bool _isScreenSharing;
+
         // Frame throttle: không queue quá nhiều BeginInvoke khi fps cao
         private volatile bool _remoteFramePending;
         private DateTime _lastLocalSent = DateTime.MinValue;
@@ -130,7 +134,8 @@ namespace Client_UI_App.Forms
         // Frame từ webcam local — gửi tới peer + hiển thị vào picLocal
         private void OnLocalFrame(Bitmap bmp)
         {
-            if (IsDisposed || !_cameraOn) { bmp.Dispose(); return; }
+            // Suppress webcam khi đang share màn hình
+            if (IsDisposed || !_cameraOn || _isScreenSharing) { bmp.Dispose(); return; }
 
             // Throttle local preview (không cần 30fps cho preview)
             var now = DateTime.UtcNow;
@@ -186,6 +191,78 @@ namespace Client_UI_App.Forms
             Close();
         }
 
+        // ── Screen sharing ─────────────────────────────────────────────
+
+        private void btnScreenShare_Click(object? sender, EventArgs e)
+        {
+            if (!_isScreenSharing)
+                StartScreenShare();
+            else
+                StopScreenShare();
+        }
+
+        private void StartScreenShare()
+        {
+            _isScreenSharing = true;
+            _svc.TargetFrameSize = ScreenCaptureService.FrameSize;
+
+            _screenCapture = new ScreenCaptureService();
+            _screenCapture.FrameCaptured += OnScreenFrame;
+            _screenCapture.Start();
+
+            btnScreenShare.Text      = "🖥️  Dừng chia sẻ";
+            btnScreenShare.BackColor = Color.FromArgb(180, 80, 50);
+            btnScreenShare.FlatAppearance.MouseOverBackColor = Color.FromArgb(200, 100, 70);
+
+            // Xóa local preview — sẽ được thay bằng frame màn hình
+            var old = picLocal.Image;
+            picLocal.Image = null;
+            old?.Dispose();
+        }
+
+        private void StopScreenShare()
+        {
+            _isScreenSharing = false;
+            _svc.TargetFrameSize = new Size(320, 240);
+
+            if (_screenCapture != null)
+            {
+                _screenCapture.FrameCaptured -= OnScreenFrame;
+                _screenCapture.Stop();
+                _screenCapture.Dispose();
+                _screenCapture = null;
+            }
+
+            btnScreenShare.Text      = "🖥️  Chia sẻ màn hình";
+            btnScreenShare.BackColor = Color.FromArgb(50, 50, 72);
+            btnScreenShare.FlatAppearance.MouseOverBackColor = Color.FromArgb(65, 65, 92);
+        }
+
+        // Frame từ màn hình — gửi tới peer + cập nhật local preview
+        private void OnScreenFrame(Bitmap bmp)
+        {
+            if (IsDisposed) { bmp.Dispose(); return; }
+
+            _svc.SendVideoFrame(bmp);
+
+            var now = DateTime.UtcNow;
+            bool show = (now - _lastLocalSent).TotalMilliseconds >= LocalIntervalMs;
+            if (show)
+            {
+                _lastLocalSent = now;
+                var clone = (Bitmap)bmp.Clone();
+                BeginInvoke(() =>
+                {
+                    if (IsDisposed) { clone.Dispose(); return; }
+                    var old = picLocal.Image;
+                    picLocal.Image = clone;
+                    old?.Dispose();
+                });
+            }
+
+            bmp.Dispose();
+        }
+
         // Hiển thị caption (dùng cho bot video call — giống VoiceCallForm.AddSubtitle)
         public void AddCaption(string speaker, string text)
         {
@@ -222,6 +299,14 @@ namespace Client_UI_App.Forms
 
             if (_capture != null)
                 _capture.FrameCaptured -= OnLocalFrame;
+
+            if (_screenCapture != null)
+            {
+                _screenCapture.FrameCaptured -= OnScreenFrame;
+                _screenCapture.Stop();
+                _screenCapture.Dispose();
+                _screenCapture = null;
+            }
 
             _timer?.Stop();
             _timer?.Dispose();
