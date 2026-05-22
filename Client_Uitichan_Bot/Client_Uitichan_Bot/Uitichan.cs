@@ -203,39 +203,48 @@ while (true)
 //       → AI xử lý → RELAY BOT_RESPONSE|sessionId|encryptedResponse về fromUser
 static async Task PollBotRelayAsync(string srvIp, string secretKey)
 {
-    using var http = new HttpClient();
+    // Poll song song cả 2 Directory Server — relay message chỉ nằm trên 1 server,
+    // poll cả 2 đảm bảo không bị mất dù LB route tới server nào.
+    int[] dirPorts = { 8888, 8889 };
     while (true)
     {
-        try
-        {
-            int dirPort = await GetDirectoryPortAsync();
-            using TcpClient tc = new(srvIp, dirPort);
-            using var stream = tc.GetStream();
-            using var reader = new StreamReader(stream, new UTF8Encoding(false));
-            using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
-
-            await writer.WriteLineAsync("POLL|UitiChan");
-            string? header = await reader.ReadLineAsync();
-            if (header == null || !header.StartsWith("POLL_RESULT|")) { await Task.Delay(1500); continue; }
-
-            int count = int.Parse(header.Split('|')[1]);
-            for (int i = 0; i < count; i++)
-            {
-                string? msgLine = await reader.ReadLineAsync();
-                if (msgLine == null) break;
-                // Server format: MSG|fromUser|senderIp|<content>
-                string[] outer = msgLine.Split('|', 4);
-                if (outer.Length < 4) continue;
-                string fromUser = outer[1];
-                string content  = outer[3];
-                if (content.StartsWith("BOT_REQUEST|"))
-                    _ = Task.Run(() => HandleBotRelayRequestAsync(srvIp, fromUser, content, secretKey));
-            }
-        }
-        catch { /* server tạm thời không kết nối được — bỏ qua */ }
-
+        var pollTasks = dirPorts.Select(port => PollBotRelayFromPortAsync(srvIp, port, secretKey));
+        await Task.WhenAll(pollTasks);
         await Task.Delay(1500);
     }
+}
+
+static async Task PollBotRelayFromPortAsync(string srvIp, int dirPort, string secretKey)
+{
+    try
+    {
+        using TcpClient tc = new();
+        tc.ReceiveTimeout = 4000;
+        tc.SendTimeout    = 4000;
+        await tc.ConnectAsync(srvIp, dirPort);
+        using var stream = tc.GetStream();
+        using var reader = new StreamReader(stream, new UTF8Encoding(false));
+        using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
+
+        await writer.WriteLineAsync("POLL|UitiChan");
+        string? header = await reader.ReadLineAsync();
+        if (header == null || !header.StartsWith("POLL_RESULT|")) return;
+
+        if (!int.TryParse(header.Split('|')[1], out int count) || count <= 0) return;
+        for (int i = 0; i < count; i++)
+        {
+            string? msgLine = await reader.ReadLineAsync();
+            if (msgLine == null) break;
+            // Server format: MSG|fromUser|senderIp|<content>
+            string[] outer = msgLine.Split('|', 4);
+            if (outer.Length < 4) continue;
+            string fromUser = outer[1];
+            string content  = outer[3];
+            if (content.StartsWith("BOT_REQUEST|"))
+                _ = Task.Run(() => HandleBotRelayRequestAsync(srvIp, fromUser, content, secretKey));
+        }
+    }
+    catch { /* server tạm thời không kết nối được — bỏ qua */ }
 }
 
 // ── Xử lý 1 BOT_REQUEST nhận qua relay ──────────────────────────────
@@ -258,11 +267,21 @@ static async Task HandleBotRelayRequestAsync(string srvIp, string fromUser, stri
         var (vnText, _) = ParseBilingualResponse(aiRaw);
 
         string encryptedOut = Client_Uitichan_Bot.SecurityService.Encrypt(vnText, secretKey);
-        int relayPort = await GetDirectoryPortAsync();
-        using TcpClient tc = new(srvIp, relayPort);
-        using var stream = tc.GetStream();
-        using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
-        await writer.WriteLineAsync($"RELAY|UitiChan|{fromUser}|BOT_RESPONSE|{sessionId}|{encryptedOut}");
+        string relayLine = $"RELAY|UitiChan|{fromUser}|BOT_RESPONSE|{sessionId}|{encryptedOut}";
+        // Broadcast tới cả 2 server — client poll bất kỳ server nào cũng nhận được
+        int[] dirPorts = { 8888, 8889 };
+        await Task.WhenAll(dirPorts.Select(async port =>
+        {
+            try
+            {
+                using TcpClient tc = new();
+                await tc.ConnectAsync(srvIp, port);
+                using var stream = tc.GetStream();
+                using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
+                await writer.WriteLineAsync(relayLine);
+            }
+            catch { }
+        }));
 
         Console.ForegroundColor = ConsoleColor.DarkGray;
         Console.WriteLine($"[RELAY OUT] BOT_RESPONSE → {fromUser}");
