@@ -436,7 +436,8 @@ namespace Client_UI_App.Forms
             try
             {
                 _voiceService = new GroupVoiceService();
-                int myUdp = await _voiceService.StartAsync();
+                await _voiceService.StartAsync();
+                int myUdp = _voiceService.LocalUdpPort;
 
                 _voiceMembers.Add(_myUsername);
                 UpdateVoiceButton();
@@ -507,7 +508,7 @@ namespace Client_UI_App.Forms
             {
                 _voiceService.AddPeer(peerName, peerIp, peerUdpPort);
                 _ = GroupChatService.SendVoiceReplyAsync(
-                    peerIp, peerTcpPort, _groupId, _myUsername, _voiceService.ExternalUdpPort,
+                    peerIp, peerTcpPort, _groupId, _myUsername, _voiceService.LocalUdpPort,
                     _myUsername, peerName);
             }
         }
@@ -596,7 +597,7 @@ namespace Client_UI_App.Forms
             try
             {
                 _videoService = new GroupVideoService();
-                await _videoService.StartAsync();
+                await _videoService.StartAsync(); // STUN kept for future cross-NAT use
 
                 _videoCapture = TryStartCamera();
 
@@ -610,7 +611,7 @@ namespace Client_UI_App.Forms
                 if (endpoints.Count > 0)
                     await GroupChatService.BroadcastVideoJoinAsync(
                         _groupId, _myUsername,
-                        _videoService.ExternalAudioPort, _videoService.ExternalVideoPort,
+                        _videoService.LocalAudioPort, _videoService.LocalVideoPort,
                         P2PListenerService.ListeningPort, endpoints);
 
                 SetStatus($"📹 Video  ({_videoMembers.Count} người)", Color.FromArgb(80, 150, 230));
@@ -688,7 +689,7 @@ namespace Client_UI_App.Forms
                 _videoService.AddPeer(peerName, peerIp, peerAudio, peerVideo);
                 _ = GroupChatService.SendVideoReplyAsync(
                     peerIp, peerTcpPort, _groupId, _myUsername,
-                    _videoService.ExternalAudioPort, _videoService.ExternalVideoPort,
+                    _videoService.LocalAudioPort, _videoService.LocalVideoPort,
                     _myUsername, peerName);
             }
         }

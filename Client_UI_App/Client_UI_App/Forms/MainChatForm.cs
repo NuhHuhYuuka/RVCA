@@ -1060,8 +1060,9 @@ namespace Client_UI_App.Forms
             {
                 SetStatus("Kết nối qua relay đến UitiChan...", Color.DodgerBlue);
                 var acceptTask = P2PChatService.WaitBotVoiceAcceptAsync(15000);
+                string myLanIp = DirectoryService.GetLocalLanIp();
                 await DirectoryService.RelayAsync(_username, "UitiChan",
-                    $"VOICE_OFFER|{_username}|{localUdpPort}");
+                    $"VOICE_OFFER|{_username}|{localUdpPort}|{myLanIp}");
                 var (botIp, botUdpPort) = await acceptTask;
 
                 _activecall.SetRemoteEndpoint(botIp, botUdpPort);

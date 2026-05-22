@@ -97,7 +97,7 @@ namespace Client_UI_App.Services
 
         // Lấy IP LAN thực của máy này (không phải loopback)
         // Dùng "UDP trick": giả kết nối tới 8.8.8.8 để OS chọn interface ra ngoài
-        private static string GetLocalLanIp()
+        public static string GetLocalLanIp()
         {
             try
             {
