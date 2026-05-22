@@ -218,11 +218,12 @@ static async Task PollBotRelayFromPortAsync(string srvIp, int dirPort, string se
 {
     try
     {
+        using var connectCts = new CancellationTokenSource(4000);
         using TcpClient tc = new();
-        tc.ReceiveTimeout = 4000;
-        tc.SendTimeout    = 4000;
-        await tc.ConnectAsync(srvIp, dirPort);
+        await tc.ConnectAsync(srvIp, dirPort, connectCts.Token);
         using var stream = tc.GetStream();
+        stream.ReadTimeout  = 4000;
+        stream.WriteTimeout = 4000;
         using var reader = new StreamReader(stream, new UTF8Encoding(false));
         using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
 
@@ -274,11 +275,16 @@ static async Task HandleBotRelayRequestAsync(string srvIp, string fromUser, stri
         {
             try
             {
+                using var connectCts = new CancellationTokenSource(4000);
                 using TcpClient tc = new();
-                await tc.ConnectAsync(srvIp, port);
+                await tc.ConnectAsync(srvIp, port, connectCts.Token);
                 using var stream = tc.GetStream();
+                stream.ReadTimeout  = 4000;
+                stream.WriteTimeout = 4000;
+                using var reader = new StreamReader(stream, new UTF8Encoding(false));
                 using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
                 await writer.WriteLineAsync(relayLine);
+                _ = await reader.ReadLineAsync(); // consume RELAY_OK
             }
             catch { }
         }));
