@@ -32,9 +32,9 @@ namespace Client_UI_App.Services
         }
 
         // ── Đăng ký tài khoản mới ──
-        // Gửi: SIGNUP|username|password
+        // Gửi: SIGNUP|username|password|email
         public static async Task<(bool success, string message)> SignupAsync(
-            int dirPort, string username, string password)
+            int dirPort, string username, string password, string email = "")
         {
             using TcpClient client = new();
             await client.ConnectAsync(LbIp, dirPort);
@@ -43,12 +43,55 @@ namespace Client_UI_App.Services
             using StreamReader  reader = new(stream, Encoding.UTF8, leaveOpen: true);
             await using StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
 
-            await writer.WriteLineAsync($"SIGNUP|{username}|{password}");
+            await writer.WriteLineAsync($"SIGNUP|{username}|{password}|{email}");
 
             string response = await reader.ReadLineAsync() ?? string.Empty;
             string[] parts  = response.Split('|');
             bool   ok  = parts[0] == "SIGNUP_SUCCESS";
             string msg = parts.Length > 1 ? parts[1] : response;
+            return (ok, msg);
+        }
+
+        // ── Gửi OTP về Gmail đã đăng ký ──
+        // Gửi: FORGOT_PASSWORD|email
+        public static async Task<(bool success, string message)> ForgotPasswordAsync(string email)
+        {
+            int dirPort = await GetDirectoryPortAsync();
+            using TcpClient client = new();
+            await client.ConnectAsync(LbIp, dirPort);
+
+            await using NetworkStream stream = client.GetStream();
+            using StreamReader  reader = new(stream, Encoding.UTF8, leaveOpen: true);
+            await using StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+
+            await writer.WriteLineAsync($"FORGOT_PASSWORD|{email}");
+
+            string response = await reader.ReadLineAsync() ?? string.Empty;
+            string[] parts  = response.Split('|');
+            bool   ok  = parts[0] == "FORGOT_SUCCESS";
+            string msg = parts.Length > 1 ? parts[1] : (ok ? "OTP đã được gửi." : "Thất bại.");
+            return (ok, msg);
+        }
+
+        // ── Đặt lại mật khẩu bằng OTP ──
+        // Gửi: RESET_PASSWORD|email|otp|newpassword
+        public static async Task<(bool success, string message)> ResetPasswordAsync(
+            string email, string otp, string newPassword)
+        {
+            int dirPort = await GetDirectoryPortAsync();
+            using TcpClient client = new();
+            await client.ConnectAsync(LbIp, dirPort);
+
+            await using NetworkStream stream = client.GetStream();
+            using StreamReader  reader = new(stream, Encoding.UTF8, leaveOpen: true);
+            await using StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+
+            await writer.WriteLineAsync($"RESET_PASSWORD|{email}|{otp}|{newPassword}");
+
+            string response = await reader.ReadLineAsync() ?? string.Empty;
+            string[] parts  = response.Split('|');
+            bool   ok  = parts[0] == "RESET_SUCCESS";
+            string msg = parts.Length > 1 ? parts[1] : (ok ? "Mật khẩu đã được đặt lại." : "Thất bại.");
             return (ok, msg);
         }
 

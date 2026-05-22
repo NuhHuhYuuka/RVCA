@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Mail;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
@@ -69,6 +70,10 @@ static void InitializeDatabase()
         using SqliteCommand command = new SqliteCommand(createTableQuery, connection);
         command.ExecuteNonQuery();
 
+        TryAddColumn(connection, "Users", "Email",     "TEXT NOT NULL DEFAULT ''");
+        TryAddColumn(connection, "Users", "OtpCode",   "TEXT NOT NULL DEFAULT ''");
+        TryAddColumn(connection, "Users", "OtpExpiry", "TEXT NOT NULL DEFAULT ''");
+
         Console.ForegroundColor = ConsoleColor.Cyan;
         Console.WriteLine("[DB STATUS] Auth.db initialized successfully.");
         Console.ResetColor();
@@ -101,10 +106,11 @@ static void HandleClient(
         string connectionString = "Data Source=Auth.db";
 
         // ── CHỨC NĂNG 1: ĐĂNG KÝ TÀI KHOẢN (SIGNUP) ─────────────────
-        if (command == "SIGNUP" && protocolParts.Length == 3)
+        if (command == "SIGNUP" && protocolParts.Length >= 3)
         {
             string username = protocolParts[1];
             string password = protocolParts[2];
+            string email    = protocolParts.Length >= 4 ? protocolParts[3] : "";
 
             try
             {
@@ -122,10 +128,11 @@ static void HandleClient(
                 }
                 else
                 {
-                    string insertQuery = "INSERT INTO Users (Username, PasswordHash) VALUES (@username, @password)";
+                    string insertQuery = "INSERT INTO Users (Username, PasswordHash, Email) VALUES (@username, @password, @email)";
                     using SqliteCommand insertCmd = new(insertQuery, dbConnection);
                     insertCmd.Parameters.AddWithValue("@username", username);
                     insertCmd.Parameters.AddWithValue("@password", password);
+                    insertCmd.Parameters.AddWithValue("@email",    email);
                     insertCmd.ExecuteNonQuery();
 
                     writer.WriteLine("SIGNUP_SUCCESS|Đăng ký thành công!");
@@ -346,6 +353,98 @@ static void HandleClient(
 
             writer.WriteLine($"MY_GROUPS|{string.Join(",", myGroups)}");
         }
+        // ── QUÊN MẬT KHẨU: FORGOT_PASSWORD|email ────────────────────
+        else if (command == "FORGOT_PASSWORD" && protocolParts.Length >= 2)
+        {
+            string email = protocolParts[1];
+            try
+            {
+                using SqliteConnection dbConnection = new(connectionString);
+                dbConnection.Open();
+
+                string checkQuery = "SELECT COUNT(1) FROM Users WHERE Email = @email";
+                using SqliteCommand checkCmd = new(checkQuery, dbConnection);
+                checkCmd.Parameters.AddWithValue("@email", email);
+                long count = (long)checkCmd.ExecuteScalar()!;
+
+                if (count == 0)
+                {
+                    writer.WriteLine("FORGOT_FAILED|Email không tồn tại trong hệ thống.");
+                }
+                else
+                {
+                    string otp    = GenerateOtp();
+                    string expiry = DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeSeconds().ToString();
+
+                    string updateQuery = "UPDATE Users SET OtpCode = @otp, OtpExpiry = @exp WHERE Email = @email";
+                    using SqliteCommand updateCmd = new(updateQuery, dbConnection);
+                    updateCmd.Parameters.AddWithValue("@otp",   otp);
+                    updateCmd.Parameters.AddWithValue("@exp",   expiry);
+                    updateCmd.Parameters.AddWithValue("@email", email);
+                    updateCmd.ExecuteNonQuery();
+
+                    SendOtpEmail(email, otp);
+                    writer.WriteLine("FORGOT_SUCCESS");
+                    Console.ForegroundColor = ConsoleColor.Cyan;
+                    Console.WriteLine($"[OTP] Sent OTP to {email}");
+                    Console.ResetColor();
+                }
+            }
+            catch (Exception ex)
+            {
+                writer.WriteLine($"FORGOT_FAILED|Lỗi hệ thống: {ex.Message}");
+            }
+        }
+        // ── ĐẶT LẠI MẬT KHẨU: RESET_PASSWORD|email|otp|newpassword ─
+        else if (command == "RESET_PASSWORD" && protocolParts.Length >= 4)
+        {
+            string email       = protocolParts[1];
+            string otp         = protocolParts[2];
+            string newPassword = string.Join("|", protocolParts[3..]);
+            try
+            {
+                using SqliteConnection dbConnection = new(connectionString);
+                dbConnection.Open();
+
+                string storedOtp = "", storedExpiry = "";
+                string selectQuery = "SELECT OtpCode, OtpExpiry FROM Users WHERE Email = @email";
+                using (SqliteCommand selectCmd = new(selectQuery, dbConnection))
+                {
+                    selectCmd.Parameters.AddWithValue("@email", email);
+                    using var r = selectCmd.ExecuteReader();
+                    if (!r.Read()) { writer.WriteLine("RESET_FAILED|Email không tồn tại."); return; }
+                    storedOtp    = r["OtpCode"]?.ToString()   ?? "";
+                    storedExpiry = r["OtpExpiry"]?.ToString() ?? "";
+                }
+
+                if (storedOtp != otp)
+                {
+                    writer.WriteLine("RESET_FAILED|Mã OTP không đúng.");
+                }
+                else if (!long.TryParse(storedExpiry, out long expUnix) ||
+                         DateTimeOffset.UtcNow.ToUnixTimeSeconds() > expUnix)
+                {
+                    writer.WriteLine("RESET_FAILED|Mã OTP đã hết hạn.");
+                }
+                else
+                {
+                    string updateQuery = "UPDATE Users SET PasswordHash = @pwd, OtpCode = '', OtpExpiry = '' WHERE Email = @email";
+                    using SqliteCommand updateCmd = new(updateQuery, dbConnection);
+                    updateCmd.Parameters.AddWithValue("@pwd",   newPassword);
+                    updateCmd.Parameters.AddWithValue("@email", email);
+                    updateCmd.ExecuteNonQuery();
+
+                    writer.WriteLine("RESET_SUCCESS");
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine($"[RESET] Password reset for {email}");
+                    Console.ResetColor();
+                }
+            }
+            catch (Exception ex)
+            {
+                writer.WriteLine($"RESET_FAILED|Lỗi hệ thống: {ex.Message}");
+            }
+        }
         else
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
@@ -463,6 +562,32 @@ static void PersistMemberRemove(string groupId, string username)
         cmd.ExecuteNonQuery();
     }
     catch { }
+}
+
+static void TryAddColumn(SqliteConnection conn, string table, string column, string definition)
+{
+    try { new SqliteCommand($"ALTER TABLE {table} ADD COLUMN {column} {definition}", conn).ExecuteNonQuery(); }
+    catch { }
+}
+
+static string GenerateOtp()
+    => System.Security.Cryptography.RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
+
+static void SendOtpEmail(string toEmail, string otp)
+{
+#pragma warning disable SYSLIB0040
+    using var smtp = new SmtpClient("smtp.gmail.com", 587);
+    smtp.EnableSsl   = true;
+    smtp.Credentials = new NetworkCredential("doanltmcb@gmail.com", "skqcafldryzzwcvv");
+    var msg = new MailMessage
+    {
+        From    = new MailAddress("doanltmcb@gmail.com", "Uiti-chan Chat"),
+        Subject = "Mã OTP đặt lại mật khẩu – Uiti-chan",
+        Body    = $"Xin chào,\n\nMã OTP của bạn là: {otp}\n\nMã có hiệu lực trong 5 phút.\n\n– Uiti-chan Chat"
+    };
+    msg.To.Add(toEmail);
+    smtp.Send(msg);
+#pragma warning restore SYSLIB0040
 }
 
 // --- Model dữ liệu cho Nhóm ---
