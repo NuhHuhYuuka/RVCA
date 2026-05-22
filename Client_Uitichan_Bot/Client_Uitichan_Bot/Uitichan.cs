@@ -265,10 +265,17 @@ static async Task HandleBotRelayRequestAsync(string srvIp, string fromUser, stri
         Console.ResetColor();
 
         string aiRaw = await AskOpenRouterAsync(plainText);
-        var (vnText, _) = ParseBilingualResponse(aiRaw);
+        var (vnText, jpText) = ParseBilingualResponse(aiRaw);
+
+        string audioBase64 = "";
+        if (!string.IsNullOrWhiteSpace(jpText))
+        {
+            try { audioBase64 = Convert.ToBase64String(await GetVoiceVoxAudioAsync(jpText)); }
+            catch { }
+        }
 
         string encryptedOut = Client_Uitichan_Bot.SecurityService.Encrypt(vnText, secretKey);
-        string relayLine = $"RELAY|UitiChan|{fromUser}|BOT_RESPONSE|{sessionId}|{encryptedOut}";
+        string relayLine = $"RELAY|UitiChan|{fromUser}|BOT_RESPONSE|{sessionId}|{encryptedOut}|{audioBase64}";
         // Broadcast tới cả 2 server — client poll bất kỳ server nào cũng nhận được
         int[] dirPorts = { 8888, 8889 };
         await Task.WhenAll(dirPorts.Select(async port =>
