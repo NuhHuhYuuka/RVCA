@@ -152,6 +152,12 @@ namespace Client_UI_App.Services
                 string[] p = line.Split('|', 2);
                 if (p.Length == 2) VideoCallHungUp?.Invoke(p[1]);
             }
+            else if (line.StartsWith("BOT_RESPONSE|"))
+            {
+                // BOT_RESPONSE|sessionId|encryptedText
+                string[] p = line.Split('|', 3);
+                if (p.Length == 3) P2PChatService.CompleteBotRelayResponse(p[1], p[2]);
+            }
             else if (line.StartsWith("FILE_RELAY|"))
             {
                 // FILE_RELAY|senderName|fileName|sha256|base64Data
@@ -167,6 +173,27 @@ namespace Client_UI_App.Services
                         string actualSha = FileTransferService.ComputeSha256(savePath);
                         if (actualSha.Equals(p[3], StringComparison.OrdinalIgnoreCase))
                             FileReceived?.Invoke(p[1], p[2], savePath);
+                        else
+                            try { File.Delete(savePath); } catch { }
+                    }
+                    catch { }
+                }
+            }
+            else if (line.StartsWith("GROUP_FILE_RELAY|"))
+            {
+                // GROUP_FILE_RELAY|groupId|groupName|senderName|fileName|sha256|base64Data
+                string[] p = line.Split('|', 7);
+                if (p.Length == 7)
+                {
+                    try
+                    {
+                        byte[] data      = Convert.FromBase64String(p[6]);
+                        string saveDir   = FileTransferService.GetReceiveFolder();
+                        string savePath  = Path.Combine(saveDir, p[4]);
+                        File.WriteAllBytes(savePath, data);
+                        string actualSha = FileTransferService.ComputeSha256(savePath);
+                        if (actualSha.Equals(p[5], StringComparison.OrdinalIgnoreCase))
+                            GroupFileReceived?.Invoke(p[1], p[2], p[3], p[4], savePath);
                         else
                             try { File.Delete(savePath); } catch { }
                     }

@@ -214,7 +214,7 @@ namespace Client_UI_App.Forms
                     // Broadcast real-time tới các thành viên đang mở nhóm
                     var endpoints = await ResolveOnlineMembersAsync();
                     if (endpoints.Count > 0)
-                        _ = GroupChatService.BroadcastRenameAsync(_groupId, _groupName, endpoints);
+                        _ = GroupChatService.BroadcastRenameAsync(_groupId, _groupName, _myUsername, endpoints);
                 }
                 else
                 {
@@ -325,7 +325,7 @@ namespace Client_UI_App.Forms
         // ── @Uiti mention: hỏi bot rồi broadcast reply vào nhóm ─────
         private async Task HandleUitiMentionAsync(
             string message,
-            List<(string ip, int port)> endpoints)
+            List<(string name, string ip, int port)> endpoints)
         {
             try
             {
@@ -508,7 +508,8 @@ namespace Client_UI_App.Forms
             {
                 _voiceService.AddPeer(peerName, peerIp, peerUdpPort);
                 _ = GroupChatService.SendVoiceReplyAsync(
-                    peerIp, peerTcpPort, _groupId, _myUsername, _voiceService.LocalUdpPort);
+                    peerIp, peerTcpPort, _groupId, _myUsername, _voiceService.LocalUdpPort,
+                    _myUsername, peerName);
             }
         }
 
@@ -688,7 +689,8 @@ namespace Client_UI_App.Forms
                 _videoService.AddPeer(peerName, peerIp, peerAudio, peerVideo);
                 _ = GroupChatService.SendVideoReplyAsync(
                     peerIp, peerTcpPort, _groupId, _myUsername,
-                    _videoService.LocalAudioPort, _videoService.LocalVideoPort);
+                    _videoService.LocalAudioPort, _videoService.LocalVideoPort,
+                    _myUsername, peerName);
             }
         }
 
@@ -749,15 +751,14 @@ namespace Client_UI_App.Forms
         }
 
         // ── Resolve IP:Port cho tất cả thành viên (trừ mình) ─────────
-        private async Task<List<(string ip, int port)>> ResolveOnlineMembersAsync()
+        private async Task<List<(string name, string ip, int port)>> ResolveOnlineMembersAsync()
         {
-            // Làm mới danh sách thành viên trước
             var (found, _, members) = await DirectoryService.GetGroupMembersAsync(_groupId);
-            if (!found) return new List<(string, int)>();
+            if (!found) return new();
 
             _members = members;
 
-            var endpoints = new List<(string ip, int port)>();
+            var endpoints = new List<(string, string, int)>();
             int dirPort   = await DirectoryService.GetDirectoryPortAsync();
 
             foreach (string member in members)
@@ -769,7 +770,7 @@ namespace Client_UI_App.Forms
 
                 string[] ipParts = ipPort.Split(':');
                 if (ipParts.Length != 2 || !int.TryParse(ipParts[1], out int port)) continue;
-                endpoints.Add((ipParts[0], port));
+                endpoints.Add((member, ipParts[0], port));
             }
 
             return endpoints;

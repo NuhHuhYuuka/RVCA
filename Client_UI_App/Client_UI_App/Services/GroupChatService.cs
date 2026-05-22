@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using SecurityData.Services;
 
@@ -13,156 +15,186 @@ namespace Client_UI_App.Services
     internal static class GroupChatService
     {
         // ── Gửi tin nhắn văn bản tới tất cả thành viên nhóm ─────────
-        // memberEndpoints: danh sách (ip, port) của các thành viên đã resolve trước
+        // memberEndpoints: (memberName, ip, port) đã resolve trước
         public static async Task SendGroupMessageAsync(
-            string                           groupId,
-            string                           groupName,
-            string                           senderName,
-            string                           message,
-            IEnumerable<(string ip, int port)> memberEndpoints)
+            string                                      groupId,
+            string                                      groupName,
+            string                                      senderName,
+            string                                      message,
+            IEnumerable<(string name, string ip, int port)> memberEndpoints)
         {
-            // GROUP_MSG|groupId|groupName|sender|message
             string line = $"GROUP_MSG|{groupId}|{groupName}|{senderName}|{message}";
             var tasks = new List<Task>();
-            foreach (var (ip, port) in memberEndpoints)
-                tasks.Add(SendLineAsync(ip, port, line));
+            foreach (var (name, ip, port) in memberEndpoints)
+                tasks.Add(SendLineAsync(ip, port, line, senderName, name));
             await Task.WhenAll(tasks);
         }
 
-        // ── Gửi file tới tất cả thành viên nhóm (chunked 64KB) ───────
+        // ── Gửi file tới tất cả thành viên nhóm (P2P chunked hoặc relay base64) ──
         public static async Task SendGroupFileAsync(
-            string                           groupId,
-            string                           groupName,
-            string                           senderName,
-            string                           filePath,
-            IEnumerable<(string ip, int port)> memberEndpoints,
-            IProgress<int>?                  progress = null)
+            string                                      groupId,
+            string                                      groupName,
+            string                                      senderName,
+            string                                      filePath,
+            IEnumerable<(string name, string ip, int port)> memberEndpoints,
+            IProgress<int>?                             progress = null)
         {
             var fileInfo   = new FileInfo(filePath);
             const int chunkSize = 64 * 1024;
             int  totalChunks = (int)Math.Ceiling((double)fileInfo.Length / chunkSize);
             string sha256   = FileTransferService.ComputeSha256(filePath);
             string fileName = fileInfo.Name;
+            string header   = $"GROUP_FILE_INIT|{groupId}|{groupName}|{senderName}|{fileName}|{totalChunks}|{sha256}";
 
-            string header = $"GROUP_FILE_INIT|{groupId}|{groupName}|{senderName}|{fileName}|{totalChunks}|{sha256}";
+            var endpointList = memberEndpoints.ToList();
 
-            // Kết nối song song tới tất cả thành viên, gửi cùng chunks
-            var clients = new List<(TcpClient tcp, StreamWriter writer)>();
-            foreach (var (ip, port) in memberEndpoints)
+            // Thử kết nối P2P song song với 500ms timeout
+            var p2pClients = new List<(string name, TcpClient tcp, StreamWriter writer)>();
+            var relayTargets = new List<string>();
+
+            foreach (var (name, ip, port) in endpointList)
             {
+                bool connected = false;
                 try
                 {
+                    using var cts = new CancellationTokenSource(500);
                     var tcp = new TcpClient { SendTimeout = 60_000 };
-                    await tcp.ConnectAsync(ip, port);
+                    await tcp.ConnectAsync(ip, port, cts.Token);
                     var sw = new StreamWriter(tcp.GetStream(), Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
                     await sw.WriteLineAsync(header);
-                    clients.Add((tcp, sw));
+                    p2pClients.Add((name, tcp, sw));
+                    connected = true;
                 }
-                catch { /* Thành viên offline — bỏ qua */ }
-            }
-
-            if (clients.Count == 0) return;
-
-            int idx = 0;
-            foreach (var chunk in FileTransferService.SplitFile(filePath, chunkSize))
-            {
-                string line = $"FILE_CHUNK|{idx}|{Convert.ToBase64String(chunk.Data)}";
-                foreach (var (_, writer) in clients)
-                {
-                    try { await writer.WriteLineAsync(line); }
-                    catch { /* Thành viên đã disconnect giữa chừng */ }
-                }
-                progress?.Report((idx + 1) * 100 / totalChunks);
-                idx++;
-            }
-
-            // Đóng kết nối
-            foreach (var (tcp, writer) in clients)
-            {
-                try { await writer.DisposeAsync(); tcp.Close(); }
                 catch { }
+
+                if (!connected) relayTargets.Add(name);
+            }
+
+            // Gửi chunks tới các client P2P đã kết nối
+            int idx = 0;
+            if (p2pClients.Count > 0)
+            {
+                foreach (var chunk in FileTransferService.SplitFile(filePath, chunkSize))
+                {
+                    string line = $"FILE_CHUNK|{idx}|{Convert.ToBase64String(chunk.Data)}";
+                    foreach (var (_, _, writer) in p2pClients)
+                    {
+                        try { await writer.WriteLineAsync(line); } catch { }
+                    }
+                    if (relayTargets.Count == 0)
+                        progress?.Report((idx + 1) * 100 / totalChunks);
+                    idx++;
+                }
+                foreach (var (_, tcp, writer) in p2pClients)
+                {
+                    try { await writer.DisposeAsync(); tcp.Close(); } catch { }
+                }
+            }
+
+            // Relay fallback: gửi file nguyên vẹn base64 cho các thành viên không P2P được
+            if (relayTargets.Count > 0)
+            {
+                byte[] data = File.ReadAllBytes(filePath);
+                string base64All = Convert.ToBase64String(data);
+                string relayLine = $"GROUP_FILE_RELAY|{groupId}|{groupName}|{senderName}|{fileName}|{sha256}|{base64All}";
+                var relayTasks = relayTargets.Select(t =>
+                    DirectoryService.RelayAsync(senderName, t, relayLine)).ToList();
+                await Task.WhenAll(relayTasks);
+                progress?.Report(100);
             }
         }
 
         // ── Broadcast tham gia voice channel ─────────────────────────
-        // Gửi GROUP_VOICE_JOIN tới tất cả thành viên để họ biết UDP port của mình
         public static Task BroadcastVoiceJoinAsync(
             string groupId, string username, int udpPort, int myTcpPort,
-            IEnumerable<(string ip, int port)> memberEndpoints)
+            IEnumerable<(string name, string ip, int port)> memberEndpoints)
         {
             string line = $"GROUP_VOICE_JOIN|{groupId}|{username}|{udpPort}|{myTcpPort}";
-            return Task.WhenAll(memberEndpoints.Select(ep => SendLineAsync(ep.ip, ep.port, line)));
+            return Task.WhenAll(memberEndpoints.Select(ep =>
+                SendLineAsync(ep.ip, ep.port, line, username, ep.name)));
         }
 
         // Gửi GROUP_VOICE_REPLY trực tiếp về người vừa join (1 peer, không broadcast)
         public static Task SendVoiceReplyAsync(
-            string peerIp, int peerTcpPort, string groupId, string username, int myUdpPort)
+            string peerIp, int peerTcpPort, string groupId, string username, int myUdpPort,
+            string senderName = "", string targetName = "")
         {
-            return SendLineAsync(peerIp, peerTcpPort, $"GROUP_VOICE_REPLY|{groupId}|{username}|{myUdpPort}");
+            return SendLineAsync(peerIp, peerTcpPort,
+                $"GROUP_VOICE_REPLY|{groupId}|{username}|{myUdpPort}", senderName, targetName);
         }
 
         // Broadcast rời voice channel
         public static Task BroadcastVoiceLeaveAsync(
             string groupId, string username,
-            IEnumerable<(string ip, int port)> memberEndpoints)
+            IEnumerable<(string name, string ip, int port)> memberEndpoints)
         {
             string line = $"GROUP_VOICE_LEAVE|{groupId}|{username}";
-            return Task.WhenAll(memberEndpoints.Select(ep => SendLineAsync(ep.ip, ep.port, line)));
+            return Task.WhenAll(memberEndpoints.Select(ep =>
+                SendLineAsync(ep.ip, ep.port, line, username, ep.name)));
         }
 
         // ── Group Video channel ───────────────────────────────────────────
-        // Broadcast tham gia video channel (audio+video ports)
         public static Task BroadcastVideoJoinAsync(
             string groupId, string username,
             int audioPort, int videoPort, int myTcpPort,
-            IEnumerable<(string ip, int port)> memberEndpoints)
+            IEnumerable<(string name, string ip, int port)> memberEndpoints)
         {
             string line = $"GROUP_VIDEO_JOIN|{groupId}|{username}|{audioPort}|{videoPort}|{myTcpPort}";
-            return Task.WhenAll(memberEndpoints.Select(ep => SendLineAsync(ep.ip, ep.port, line)));
+            return Task.WhenAll(memberEndpoints.Select(ep =>
+                SendLineAsync(ep.ip, ep.port, line, username, ep.name)));
         }
 
         // Reply trực tiếp về người vừa join
         public static Task SendVideoReplyAsync(
             string peerIp, int peerTcpPort, string groupId, string username,
-            int audioPort, int videoPort)
+            int audioPort, int videoPort,
+            string senderName = "", string targetName = "")
         {
             return SendLineAsync(peerIp, peerTcpPort,
-                $"GROUP_VIDEO_REPLY|{groupId}|{username}|{audioPort}|{videoPort}");
+                $"GROUP_VIDEO_REPLY|{groupId}|{username}|{audioPort}|{videoPort}", senderName, targetName);
         }
 
         // Broadcast rời video channel
         public static Task BroadcastVideoLeaveAsync(
             string groupId, string username,
-            IEnumerable<(string ip, int port)> memberEndpoints)
+            IEnumerable<(string name, string ip, int port)> memberEndpoints)
         {
             string line = $"GROUP_VIDEO_LEAVE|{groupId}|{username}";
-            return Task.WhenAll(memberEndpoints.Select(ep => SendLineAsync(ep.ip, ep.port, line)));
+            return Task.WhenAll(memberEndpoints.Select(ep =>
+                SendLineAsync(ep.ip, ep.port, line, username, ep.name)));
         }
 
         // Broadcast đổi tên nhóm tới tất cả thành viên online
         public static Task BroadcastRenameAsync(
-            string groupId, string newName, IEnumerable<(string ip, int port)> memberEndpoints)
+            string groupId, string newName, string senderName,
+            IEnumerable<(string name, string ip, int port)> memberEndpoints)
         {
-            var tasks = memberEndpoints.Select(ep =>
-                SendLineAsync(ep.ip, ep.port, $"GROUP_RENAME|{groupId}|{newName}"));
-            return Task.WhenAll(tasks);
+            return Task.WhenAll(memberEndpoints.Select(ep =>
+                SendLineAsync(ep.ip, ep.port, $"GROUP_RENAME|{groupId}|{newName}", senderName, ep.name)));
         }
 
-        // Helper: gửi 1 dòng text tới peer, đóng kết nối
-        private static async Task SendLineAsync(string ip, int port, string line)
+        // Helper: gửi 1 dòng text tới peer — thử P2P 500ms, fallback relay qua server
+        private static async Task SendLineAsync(string ip, int port, string line,
+            string senderName = "", string targetName = "")
         {
+            bool ok = false;
             try
             {
+                using var cts = new CancellationTokenSource(500);
                 using TcpClient client = new();
                 client.SendTimeout = 5_000;
-                await client.ConnectAsync(ip, port);
+                await client.ConnectAsync(ip, port, cts.Token);
 
                 await using NetworkStream stream = client.GetStream();
                 await using StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
                 await writer.WriteLineAsync(line);
                 await Task.Delay(100);
+                ok = true;
             }
-            catch { /* Thành viên offline hoặc không thể kết nối */ }
+            catch { }
+
+            if (!ok && !string.IsNullOrEmpty(senderName) && !string.IsNullOrEmpty(targetName))
+                await DirectoryService.RelayAsync(senderName, targetName, line);
         }
     }
 }

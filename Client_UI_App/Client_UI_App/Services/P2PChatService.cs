@@ -1,5 +1,6 @@
 using SecurityData.Services;
 using System;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Net.Sockets;
 using System.Text;
@@ -26,8 +27,24 @@ namespace Client_UI_App.Services
     {
         public const string DefaultBotKey = "LTMCB_Secret_Key_2026";
 
-        // Chỉ 1 request tới Bot cùng lúc — nhiều client có thể queue
+        // Chỉ 1 request trực tiếp tới Bot cùng lúc — nhiều client có thể queue
         private static readonly SemaphoreSlim _botSemaphore = new(1, 1);
+
+        // Pending relay bot requests: sessionId → TCS
+        private static readonly ConcurrentDictionary<string, TaskCompletionSource<(string text, byte[] audio)>>
+            _botPending = new();
+
+        // Gọi bởi P2PListenerService khi nhận BOT_RESPONSE từ relay poller
+        internal static void CompleteBotRelayResponse(string sessionId, string encryptedText)
+        {
+            if (!_botPending.TryRemove(sessionId, out var tcs)) return;
+            try
+            {
+                string text = BotCryptService.Decrypt(encryptedText, DefaultBotKey);
+                tcs.TrySetResult((text, Array.Empty<byte>()));
+            }
+            catch (Exception ex) { tcs.TrySetException(ex); }
+        }
 
         // ── Gửi tin nhắn E2E encrypted đến Client thường ─────────────
         // Flow: E2E_INIT → E2E_INIT_ACK → CHAT_E2E (một kết nối duy nhất)
@@ -233,6 +250,61 @@ namespace Client_UI_App.Services
 
             if (!ok)
                 await DirectoryService.RelayAsync(fromUser, toUser, line);
+        }
+
+        // ── Gửi tin nhắn đến Bot với relay fallback ──────────────────
+        // Thử direct TCP với 2s connect timeout; nếu fail → relay qua server (text-only, không audio)
+        public static async Task<(string textResponse, byte[] audioData)> SendMessageWithRelayAsync(
+            string peerIp, int peerPort,
+            string fromUser, string peerName,
+            string plainText, string secretKey = DefaultBotKey)
+        {
+            // Direct path với 2s connect timeout
+            try
+            {
+                await _botSemaphore.WaitAsync();
+                try
+                {
+                    return await Task.Run(async () =>
+                    {
+                        using TcpClient tcpClient = new();
+                        tcpClient.ReceiveTimeout = 90_000;
+                        using var connectCts = new CancellationTokenSource(2_000);
+                        await tcpClient.ConnectAsync(peerIp, peerPort, connectCts.Token);
+
+                        await using NetworkStream stream = tcpClient.GetStream();
+                        string encryptedOut = BotCryptService.Encrypt(plainText, secretKey);
+                        byte[] sendBytes = Encoding.UTF8.GetBytes(encryptedOut + "\n");
+                        await stream.WriteAsync(sendBytes);
+
+                        using BinaryReader br = new(stream, Encoding.UTF8, leaveOpen: true);
+                        string encryptedIn = br.ReadString();
+                        int    audioLen    = br.ReadInt32();
+                        byte[] audio       = audioLen > 0 ? br.ReadBytes(audioLen) : Array.Empty<byte>();
+                        return (BotCryptService.Decrypt(encryptedIn, secretKey), audio);
+                    });
+                }
+                finally { _botSemaphore.Release(); }
+            }
+            catch { }
+
+            // Relay fallback — bot sẽ poll, xử lý, và relay lại kết quả
+            string sessionId = Guid.NewGuid().ToString("N")[..8];
+            var tcs = new TaskCompletionSource<(string, byte[])>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            _botPending[sessionId] = tcs;
+
+            try
+            {
+                string encrypted = BotCryptService.Encrypt(plainText, secretKey);
+                await DirectoryService.RelayAsync(fromUser, peerName,
+                    $"BOT_REQUEST|{sessionId}|{fromUser}|{encrypted}");
+                return await tcs.Task.WaitAsync(TimeSpan.FromSeconds(90));
+            }
+            finally
+            {
+                _botPending.TryRemove(sessionId, out _);
+            }
         }
 
         // ── Gửi tin nhắn đến Bot UitiChan (queue nếu nhiều client cùng nhắn) ──

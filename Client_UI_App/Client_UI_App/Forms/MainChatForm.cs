@@ -776,8 +776,8 @@ namespace Client_UI_App.Forms
                 {
                     SetStatus($"Đang chờ phản hồi từ {_peerName}...", Color.DodgerBlue);
 
-                    var (textResp, audioData) = await P2PChatService.SendMessageAsync(
-                        _peerIp, _peerPort, message);
+                    var (textResp, audioData) = await P2PChatService.SendMessageWithRelayAsync(
+                        _peerIp, _peerPort, _username, _peerName, message);
 
                     AppendChat($"{_peerName}: {textResp}", Color.FromArgb(200, 80, 130));
 
