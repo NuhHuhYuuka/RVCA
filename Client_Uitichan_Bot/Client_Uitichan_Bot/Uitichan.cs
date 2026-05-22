@@ -132,6 +132,9 @@ catch (Exception ex)
 }
 // ----------------------------------------------------------------------
 
+// Khởi động vòng poll relay để nhận BOT_REQUEST từ user qua server khi P2P bị chặn
+_ = Task.Run(() => PollBotRelayAsync(serverIp, aesSecretKey));
+
 // Vòng lặp chính: Xử lý tương tác của người dùng trên Local Console
 while (true)
 {
@@ -194,6 +197,84 @@ while (true)
 }
 
 // --- CÁC PHƯƠNG THỨC XỬ LÝ ĐỘC LẬP (METHODS) ---
+
+// ── Poll server relay định kỳ để nhận BOT_REQUEST khi P2P bị chặn ────
+// Flow: POLL → nhận BOT_REQUEST|sessionId|fromUser|encryptedText
+//       → AI xử lý → RELAY BOT_RESPONSE|sessionId|encryptedResponse về fromUser
+static async Task PollBotRelayAsync(string srvIp, string secretKey)
+{
+    using var http = new HttpClient();
+    while (true)
+    {
+        try
+        {
+            int dirPort = await GetDirectoryPortAsync();
+            using TcpClient tc = new(srvIp, dirPort);
+            using var stream = tc.GetStream();
+            using var reader = new StreamReader(stream, new UTF8Encoding(false));
+            using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
+
+            await writer.WriteLineAsync("POLL|UitiChan");
+            string? header = await reader.ReadLineAsync();
+            if (header == null || !header.StartsWith("POLL_RESULT|")) { await Task.Delay(1500); continue; }
+
+            int count = int.Parse(header.Split('|')[1]);
+            for (int i = 0; i < count; i++)
+            {
+                string? msgLine = await reader.ReadLineAsync();
+                if (msgLine == null) break;
+                // Server format: MSG|fromUser|senderIp|<content>
+                string[] outer = msgLine.Split('|', 4);
+                if (outer.Length < 4) continue;
+                string fromUser = outer[1];
+                string content  = outer[3];
+                if (content.StartsWith("BOT_REQUEST|"))
+                    _ = Task.Run(() => HandleBotRelayRequestAsync(srvIp, fromUser, content, secretKey));
+            }
+        }
+        catch { /* server tạm thời không kết nối được — bỏ qua */ }
+
+        await Task.Delay(1500);
+    }
+}
+
+// ── Xử lý 1 BOT_REQUEST nhận qua relay ──────────────────────────────
+static async Task HandleBotRelayRequestAsync(string srvIp, string fromUser, string content, string secretKey)
+{
+    // content: BOT_REQUEST|sessionId|fromUser|encryptedText
+    string[] p = content.Split('|', 4);
+    if (p.Length < 4) return;
+    string sessionId    = p[1];
+    string encryptedIn  = p[3];
+
+    try
+    {
+        string plainText = Client_Uitichan_Bot.SecurityService.Decrypt(encryptedIn, secretKey);
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine($"\n[RELAY IN] {fromUser}: {plainText}");
+        Console.ResetColor();
+
+        string aiRaw = await AskOpenRouterAsync(plainText);
+        var (vnText, _) = ParseBilingualResponse(aiRaw);
+
+        string encryptedOut = Client_Uitichan_Bot.SecurityService.Encrypt(vnText, secretKey);
+        int relayPort = await GetDirectoryPortAsync();
+        using TcpClient tc = new(srvIp, relayPort);
+        using var stream = tc.GetStream();
+        using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
+        await writer.WriteLineAsync($"RELAY|UitiChan|{fromUser}|BOT_RESPONSE|{sessionId}|{encryptedOut}");
+
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine($"[RELAY OUT] BOT_RESPONSE → {fromUser}");
+        Console.ResetColor();
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"[RELAY BOT ERR] {ex.Message}");
+        Console.ResetColor();
+    }
+}
 
 static void StartVoiceVoxEngine()
 {
