@@ -147,6 +147,48 @@ namespace Client_UI_App.Services
             catch { /* Peer offline hoặc từ chối kết nối */ }
         }
 
+        // ── Gửi text message với relay fallback (khi P2P bị NAT chặn) ──
+        // Thử E2E P2P trước; nếu fail → relay plaintext qua server
+        public static async Task SendToClientWithRelayAsync(
+            string peerIp, int peerPort,
+            string senderName, string peerName,
+            string message)
+        {
+            try
+            {
+                await SendToClientAsync(peerIp, peerPort, senderName, message);
+            }
+            catch
+            {
+                // P2P fail → relay qua server (không E2E, nhưng đảm bảo message đến)
+                await DirectoryService.RelayAsync(senderName, peerName, $"CHAT|{senderName}|{message}");
+            }
+        }
+
+        // ── Gửi voice/video signaling với relay fallback ──────────────
+        // Thử P2P TCP trước (timeout 2.5s); nếu fail → relay qua server
+        public static async Task SendVoiceSignalWithRelayAsync(
+            string ip, int port, string line,
+            string fromUser, string toUser)
+        {
+            bool ok = false;
+            try
+            {
+                using var cts    = new CancellationTokenSource(TimeSpan.FromMilliseconds(2500));
+                using TcpClient client = new();
+                await client.ConnectAsync(ip, port, cts.Token);
+                await using NetworkStream stream = client.GetStream();
+                await using StreamWriter  writer = new(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+                await writer.WriteLineAsync(line);
+                await Task.Delay(80);
+                ok = true;
+            }
+            catch { }
+
+            if (!ok)
+                await DirectoryService.RelayAsync(fromUser, toUser, line);
+        }
+
         // ── Gửi tin nhắn đến Bot UitiChan (queue nếu nhiều client cùng nhắn) ──
         public static async Task<(string textResponse, byte[] audioData)> SendMessageAsync(
             string peerIp,

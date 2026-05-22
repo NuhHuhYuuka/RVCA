@@ -145,6 +145,9 @@ namespace Client_UI_App.Forms
                 }
                 catch { /* Không có internet hoặc STUN bị block — bỏ qua */ }
             });
+
+            // Bắt đầu relay poller — nhận message/signaling qua server khi P2P bị NAT chặn
+            RelayPollerService.Start(_username);
         }
 
         private void OnFirstShown(object? sender, EventArgs e)
@@ -791,7 +794,7 @@ namespace Client_UI_App.Forms
                 else
                 {
                     SetStatus("Đang gửi...", Color.DodgerBlue);
-                    await P2PChatService.SendToClientAsync(_peerIp, _peerPort, _username, message);
+                    await P2PChatService.SendToClientWithRelayAsync(_peerIp, _peerPort, _username, _peerName, message);
                     SetStatus("Đã gửi", Color.SeaGreen);
                 }
             }
@@ -969,9 +972,10 @@ namespace Client_UI_App.Forms
                 _callPeerPort = _peerPort;
 
                 int localUdpPort = _activecall.PrepareUdp();
-                await P2PChatService.SendVoiceSignalAsync(
+                await P2PChatService.SendVoiceSignalWithRelayAsync(
                     _peerIp, _peerPort,
-                    $"VOICE_OFFER|{_username}|{localUdpPort}|{P2PListenerService.ListeningPort}");
+                    $"VOICE_OFFER|{_username}|{localUdpPort}|{P2PListenerService.ListeningPort}",
+                    _username, _peerName);
 
                 ShowCallForm(_peerName, isOutgoing: true);
             }
@@ -1085,15 +1089,15 @@ namespace Client_UI_App.Forms
 
             if (answer != DialogResult.Yes)
             {
-                await P2PChatService.SendVoiceSignalAsync(callerIp, callerTcpPort,
-                    $"VOICE_REJECT|{_username}");
+                await P2PChatService.SendVoiceSignalWithRelayAsync(callerIp, callerTcpPort,
+                    $"VOICE_REJECT|{_username}", _username, callerName);
                 return;
             }
 
             if (_activecall != null)
             {
-                await P2PChatService.SendVoiceSignalAsync(callerIp, callerTcpPort,
-                    $"VOICE_REJECT|{_username}");
+                await P2PChatService.SendVoiceSignalWithRelayAsync(callerIp, callerTcpPort,
+                    $"VOICE_REJECT|{_username}", _username, callerName);
                 SetStatus("Đang bận, không thể nhận cuộc gọi.", Color.OrangeRed);
                 return;
             }
@@ -1114,8 +1118,8 @@ namespace Client_UI_App.Forms
                 int localUdpPort = _activecall.PrepareUdp();
                 _activecall.SetRemoteEndpoint(callerIp, callerUdpPort);
 
-                await P2PChatService.SendVoiceSignalAsync(callerIp, callerTcpPort,
-                    $"VOICE_ANSWER|{_username}|{localUdpPort}");
+                await P2PChatService.SendVoiceSignalWithRelayAsync(callerIp, callerTcpPort,
+                    $"VOICE_ANSWER|{_username}|{localUdpPort}", _username, callerName);
 
                 // Hiển thị form TRƯỚC khi StartAudio để form kịp subscribe CallConnected
                 ShowCallForm(callerName, isOutgoing: false);
@@ -1199,8 +1203,8 @@ namespace Client_UI_App.Forms
                 }
                 else if (!string.IsNullOrEmpty(_callPeerIp) && _callPeerPort != 0)
                 {
-                    await P2PChatService.SendVoiceSignalAsync(
-                        _callPeerIp, _callPeerPort, $"VOICE_HANGUP|{_username}");
+                    await P2PChatService.SendVoiceSignalWithRelayAsync(
+                        _callPeerIp, _callPeerPort, $"VOICE_HANGUP|{_username}", _username, _callPeer);
                 }
 
                 _activecall?.Stop();
@@ -1250,8 +1254,9 @@ namespace Client_UI_App.Forms
 
                 _videoCaptureService = TryStartCamera();
 
-                await P2PChatService.SendVoiceSignalAsync(_peerIp, _peerPort,
-                    $"VIDEO_OFFER|{_username}|{_activeVideoCall.AudioLocalPort}|{_activeVideoCall.VideoLocalPort}|{P2PListenerService.ListeningPort}");
+                await P2PChatService.SendVoiceSignalWithRelayAsync(_peerIp, _peerPort,
+                    $"VIDEO_OFFER|{_username}|{_activeVideoCall.AudioLocalPort}|{_activeVideoCall.VideoLocalPort}|{P2PListenerService.ListeningPort}",
+                    _username, _peerName);
 
                 ShowVideoCallForm(_peerName, isOutgoing: true);
             }
@@ -1376,13 +1381,13 @@ namespace Client_UI_App.Forms
 
             if (answer != DialogResult.Yes)
             {
-                await P2PChatService.SendVoiceSignalAsync(callerIp, callerTcpPort, $"VIDEO_REJECT|{_username}");
+                await P2PChatService.SendVoiceSignalWithRelayAsync(callerIp, callerTcpPort, $"VIDEO_REJECT|{_username}", _username, callerName);
                 return;
             }
 
             if (_activeVideoCall != null)
             {
-                await P2PChatService.SendVoiceSignalAsync(callerIp, callerTcpPort, $"VIDEO_REJECT|{_username}");
+                await P2PChatService.SendVoiceSignalWithRelayAsync(callerIp, callerTcpPort, $"VIDEO_REJECT|{_username}", _username, callerName);
                 SetStatus("Đang bận, không thể nhận video call.", Color.OrangeRed);
                 return;
             }
@@ -1406,8 +1411,9 @@ namespace Client_UI_App.Forms
 
                 _videoCaptureService = TryStartCamera();
 
-                await P2PChatService.SendVoiceSignalAsync(callerIp, callerTcpPort,
-                    $"VIDEO_ANSWER|{_username}|{_activeVideoCall.AudioLocalPort}|{_activeVideoCall.VideoLocalPort}");
+                await P2PChatService.SendVoiceSignalWithRelayAsync(callerIp, callerTcpPort,
+                    $"VIDEO_ANSWER|{_username}|{_activeVideoCall.AudioLocalPort}|{_activeVideoCall.VideoLocalPort}",
+                    _username, callerName);
 
                 ShowVideoCallForm(callerName, isOutgoing: false);
                 _activeVideoCall.Start();
@@ -1499,8 +1505,8 @@ namespace Client_UI_App.Forms
                 }
                 else if (!string.IsNullOrEmpty(_videoCallPeerIp) && _videoCallPeerPort != 0)
                 {
-                    await P2PChatService.SendVoiceSignalAsync(
-                        _videoCallPeerIp, _videoCallPeerPort, $"VIDEO_HANGUP|{_username}");
+                    await P2PChatService.SendVoiceSignalWithRelayAsync(
+                        _videoCallPeerIp, _videoCallPeerPort, $"VIDEO_HANGUP|{_username}", _username, _videoCallPeer);
                 }
 
                 if (_videoCaptureService != null)
@@ -1562,16 +1568,16 @@ namespace Client_UI_App.Forms
             if (_activecall != null)
             {
                 if (!string.IsNullOrEmpty(_callPeerIp) && _callPeerPort != 0)
-                    await P2PChatService.SendVoiceSignalAsync(
-                        _callPeerIp, _callPeerPort, $"VOICE_HANGUP|{_username}");
+                    await P2PChatService.SendVoiceSignalWithRelayAsync(
+                        _callPeerIp, _callPeerPort, $"VOICE_HANGUP|{_username}", _username, _callPeer);
                 _activecall.Stop();
             }
 
             if (_activeVideoCall != null)
             {
                 if (!string.IsNullOrEmpty(_videoCallPeerIp) && _videoCallPeerPort != 0)
-                    await P2PChatService.SendVoiceSignalAsync(
-                        _videoCallPeerIp, _videoCallPeerPort, $"VIDEO_HANGUP|{_username}");
+                    await P2PChatService.SendVoiceSignalWithRelayAsync(
+                        _videoCallPeerIp, _videoCallPeerPort, $"VIDEO_HANGUP|{_username}", _username, _videoCallPeer);
                 if (_videoCaptureService != null)
                 {
                     _videoCaptureService.FrameCaptured -= _activeVideoCall.SendVideoFrame;
@@ -1579,6 +1585,8 @@ namespace Client_UI_App.Forms
                 }
                 _activeVideoCall.Stop();
             }
+
+            RelayPollerService.Stop();
 
             // Đóng tất cả group forms
             foreach (var form in _openGroupForms.Values)

@@ -199,6 +199,62 @@ namespace Client_UI_App.Services
             return new List<string>();
         }
 
+        // ── Relay 1 dòng P2P qua server (dùng khi P2P trực tiếp bị NAT chặn) ──
+        public static async Task<bool> RelayAsync(string fromUser, string toUser, string line)
+        {
+            try
+            {
+                int dirPort = await GetDirectoryPortAsync();
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+                using TcpClient client = new();
+                await client.ConnectAsync(LbIp, dirPort, cts.Token);
+
+                await using NetworkStream stream = client.GetStream();
+                using StreamReader  reader = new(stream, Encoding.UTF8, leaveOpen: true);
+                await using StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+
+                await writer.WriteLineAsync($"RELAY|{fromUser}|{toUser}|{line}");
+                string? resp = await reader.ReadLineAsync();
+                return resp == "RELAY_OK";
+            }
+            catch { return false; }
+        }
+
+        // ── Poll tất cả message relay chưa đọc của mình ──────────────
+        // Trả về List<(fromUser, senderPublicIp, p2pLine)>
+        public static async Task<List<(string from, string senderIp, string line)>> PollAsync(string username)
+        {
+            var result = new List<(string, string, string)>();
+            try
+            {
+                int dirPort = await GetDirectoryPortAsync();
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+                using TcpClient client = new();
+                await client.ConnectAsync(LbIp, dirPort, cts.Token);
+
+                await using NetworkStream stream = client.GetStream();
+                using StreamReader  reader = new(stream, Encoding.UTF8, leaveOpen: true);
+                await using StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+
+                await writer.WriteLineAsync($"POLL|{username}");
+                string? header = await reader.ReadLineAsync();
+                if (header == null || !header.StartsWith("POLL_RESULT|")) return result;
+                if (!int.TryParse(header.Split('|')[1], out int count) || count <= 0) return result;
+
+                for (int i = 0; i < count; i++)
+                {
+                    string? msgLine = await reader.ReadLineAsync();
+                    if (msgLine == null) break;
+                    // MSG|fromUser|senderIp|<content — may contain |>
+                    string[] p = msgLine.Split('|', 4);
+                    if (p.Length == 4 && p[0] == "MSG")
+                        result.Add((p[1], p[2], p[3]));
+                }
+            }
+            catch { }
+            return result;
+        }
+
         // ── Đăng xuất ──
         public static async Task LogoutAsync(int dirPort, string username)
         {

@@ -78,6 +78,82 @@ namespace Client_UI_App.Services
         // Group video leave:   (groupId, username)
         public static event Action<string, string>?                        GroupVideoLeft;
 
+        // ── Inject một message đến từ relay server (thay thế kết nối P2P trực tiếp) ──
+        // senderIp: public IP của người gửi (dùng cho audio/video UDP endpoint)
+        public static void InjectRelayedLine(string senderIp, string line)
+        {
+            if (string.IsNullOrEmpty(line)) return;
+            _ = Task.Run(() => ProcessRelayedLine(senderIp, line));
+        }
+
+        private static void ProcessRelayedLine(string senderIp, string line)
+        {
+            if (line.StartsWith("CHAT|"))
+            {
+                string[] p = line.Split('|', 3);
+                if (p.Length == 3) MessageReceived?.Invoke(p[1], p[2]);
+            }
+            else if (line.StartsWith("GROUP_MSG|"))
+            {
+                string[] p = line.Split('|', 5);
+                if (p.Length == 5) GroupMessageReceived?.Invoke(p[1], p[2], p[3], p[4]);
+            }
+            else if (line.StartsWith("GROUP_RENAME|"))
+            {
+                string[] p = line.Split('|', 3);
+                if (p.Length == 3) GroupRenamed?.Invoke(p[1], p[2]);
+            }
+            else if (line.StartsWith("TYPING|"))
+            {
+                string[] p = line.Split('|', 2);
+                if (p.Length == 2) TypingReceived?.Invoke(p[1]);
+            }
+            else if (line.StartsWith("VOICE_OFFER|"))
+            {
+                // VOICE_OFFER|callerName|callerUdpPort|callerTcpPort
+                string[] p = line.Split('|', 4);
+                if (p.Length == 4 && int.TryParse(p[3], out int tcp))
+                    IncomingVoiceCall?.Invoke(p[1], p[2], senderIp, tcp);
+            }
+            else if (line.StartsWith("VOICE_ANSWER|"))
+            {
+                string[] p = line.Split('|', 3);
+                if (p.Length == 3) VoiceCallAnswered?.Invoke(p[1], p[2]);
+            }
+            else if (line.StartsWith("VOICE_REJECT|"))
+            {
+                string[] p = line.Split('|', 2);
+                if (p.Length == 2) VoiceCallRejected?.Invoke(p[1]);
+            }
+            else if (line.StartsWith("VOICE_HANGUP|"))
+            {
+                string[] p = line.Split('|', 2);
+                if (p.Length == 2) VoiceCallHungUp?.Invoke(p[1]);
+            }
+            else if (line.StartsWith("VIDEO_OFFER|"))
+            {
+                // VIDEO_OFFER|callerName|audioPort|videoPort|callerTcpPort
+                string[] p = line.Split('|', 5);
+                if (p.Length == 5 && int.TryParse(p[4], out int tcp))
+                    IncomingVideoCall?.Invoke(p[1], p[2], p[3], senderIp, tcp);
+            }
+            else if (line.StartsWith("VIDEO_ANSWER|"))
+            {
+                string[] p = line.Split('|', 4);
+                if (p.Length == 4) VideoCallAnswered?.Invoke(p[1], p[2], p[3]);
+            }
+            else if (line.StartsWith("VIDEO_REJECT|"))
+            {
+                string[] p = line.Split('|', 2);
+                if (p.Length == 2) VideoCallRejected?.Invoke(p[1]);
+            }
+            else if (line.StartsWith("VIDEO_HANGUP|"))
+            {
+                string[] p = line.Split('|', 2);
+                if (p.Length == 2) VideoCallHungUp?.Invoke(p[1]);
+            }
+        }
+
         // Khởi động listener trên port ngẫu nhiên (OS chọn)
         public static int Start(string username)
         {

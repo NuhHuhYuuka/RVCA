@@ -65,6 +65,14 @@ static void InitializeDatabase()
                 GroupId  TEXT NOT NULL,
                 Username TEXT NOT NULL,
                 PRIMARY KEY (GroupId, Username)
+            );
+            CREATE TABLE IF NOT EXISTS relay_messages (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                from_user  TEXT    NOT NULL,
+                to_user    TEXT    NOT NULL,
+                sender_ip  TEXT    NOT NULL,
+                content    TEXT    NOT NULL,
+                created_at INTEGER NOT NULL
             );";
 
         using SqliteCommand command = new SqliteCommand(createTableQuery, connection);
@@ -444,6 +452,70 @@ static void HandleClient(
             {
                 writer.WriteLine($"RESET_FAILED|Lỗi hệ thống: {ex.Message}");
             }
+        }
+        // ── RELAY: chuyển tiếp 1 dòng P2P tới user khác ─────────────
+        // RELAY|fromUser|toUser|<p2p-line>
+        else if (command == "RELAY" && protocolParts.Length >= 4)
+        {
+            string fromUser  = protocolParts[1];
+            string toUser    = protocolParts[2];
+            string content   = string.Join("|", protocolParts[3..]);
+            string senderIp  = ((IPEndPoint)client.Client.RemoteEndPoint!).Address.ToString();
+            try
+            {
+                using SqliteConnection db = new(connectionString);
+                db.Open();
+                using var cmd = new SqliteCommand(
+                    "INSERT INTO relay_messages (from_user, to_user, sender_ip, content, created_at) " +
+                    "VALUES (@f, @t, @ip, @c, @ts)", db);
+                cmd.Parameters.AddWithValue("@f",  fromUser);
+                cmd.Parameters.AddWithValue("@t",  toUser);
+                cmd.Parameters.AddWithValue("@ip", senderIp);
+                cmd.Parameters.AddWithValue("@c",  content);
+                cmd.Parameters.AddWithValue("@ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+                cmd.ExecuteNonQuery();
+                writer.WriteLine("RELAY_OK");
+            }
+            catch (Exception ex) { writer.WriteLine($"RELAY_FAIL|{ex.Message}"); }
+        }
+        // ── POLL: lấy tất cả message relay chưa đọc ──────────────────
+        // POLL|username  →  POLL_RESULT|n  rồi n dòng MSG|from|senderIp|<content>
+        else if (command == "POLL" && protocolParts.Length == 2)
+        {
+            string username = protocolParts[1];
+            try
+            {
+                using SqliteConnection db = new(connectionString);
+                db.Open();
+                // Xóa message cũ hơn 5 phút
+                using var clean = new SqliteCommand(
+                    "DELETE FROM relay_messages WHERE created_at < @cut", db);
+                clean.Parameters.AddWithValue("@cut",
+                    DateTimeOffset.UtcNow.AddMinutes(-5).ToUnixTimeSeconds());
+                clean.ExecuteNonQuery();
+                // Lấy messages
+                var msgs = new List<(long id, string from, string ip, string content)>();
+                using (var sel = new SqliteCommand(
+                    "SELECT id, from_user, sender_ip, content FROM relay_messages " +
+                    "WHERE to_user = @u ORDER BY id", db))
+                {
+                    sel.Parameters.AddWithValue("@u", username);
+                    using var r = sel.ExecuteReader();
+                    while (r.Read())
+                        msgs.Add((r.GetInt64(0), r.GetString(1), r.GetString(2), r.GetString(3)));
+                }
+                // Xóa messages vừa lấy
+                if (msgs.Count > 0)
+                {
+                    string ids = string.Join(",", msgs.Select(m => m.id));
+                    new SqliteCommand($"DELETE FROM relay_messages WHERE id IN ({ids})", db)
+                        .ExecuteNonQuery();
+                }
+                writer.WriteLine($"POLL_RESULT|{msgs.Count}");
+                foreach (var (_, from, ip, content) in msgs)
+                    writer.WriteLine($"MSG|{from}|{ip}|{content}");
+            }
+            catch (Exception ex) { writer.WriteLine($"POLL_RESULT|0"); Console.WriteLine($"[POLL ERR] {ex.Message}"); }
         }
         else
         {
