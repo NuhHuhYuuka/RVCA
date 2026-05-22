@@ -970,9 +970,10 @@ namespace Client_UI_App.Forms
                 _callPeerPort = _peerPort;
 
                 int localUdpPort = _activecall.PrepareUdp();
+                string myLanIp = DirectoryService.GetLocalLanIp();
                 await P2PChatService.SendVoiceSignalWithRelayAsync(
                     _peerIp, _peerPort,
-                    $"VOICE_OFFER|{_username}|{localUdpPort}|{P2PListenerService.ListeningPort}",
+                    $"VOICE_OFFER|{_username}|{localUdpPort}|{P2PListenerService.ListeningPort}|{myLanIp}",
                     _username, _peerName);
 
                 ShowCallForm(_peerName, isOutgoing: true);
@@ -1132,8 +1133,9 @@ namespace Client_UI_App.Forms
                 int localUdpPort = _activecall.PrepareUdp();
                 _activecall.SetRemoteEndpoint(callerIp, callerUdpPort);
 
+                string myLanIp = DirectoryService.GetLocalLanIp();
                 await P2PChatService.SendVoiceSignalWithRelayAsync(callerIp, callerTcpPort,
-                    $"VOICE_ANSWER|{_username}|{localUdpPort}", _username, callerName);
+                    $"VOICE_ANSWER|{_username}|{localUdpPort}|{myLanIp}", _username, callerName);
 
                 // Hiển thị form TRƯỚC khi StartAudio để form kịp subscribe CallConnected
                 ShowCallForm(callerName, isOutgoing: false);
@@ -1270,8 +1272,9 @@ namespace Client_UI_App.Forms
 
                 _videoCaptureService = TryStartCamera();
 
+                string myLanIp = DirectoryService.GetLocalLanIp();
                 await P2PChatService.SendVoiceSignalWithRelayAsync(_peerIp, _peerPort,
-                    $"VIDEO_OFFER|{_username}|{_activeVideoCall.AudioLocalPort}|{_activeVideoCall.VideoLocalPort}|{P2PListenerService.ListeningPort}",
+                    $"VIDEO_OFFER|{_username}|{_activeVideoCall.AudioLocalPort}|{_activeVideoCall.VideoLocalPort}|{P2PListenerService.ListeningPort}|{myLanIp}",
                     _username, _peerName);
 
                 ShowVideoCallForm(_peerName, isOutgoing: true);
@@ -1427,8 +1430,9 @@ namespace Client_UI_App.Forms
 
                 _videoCaptureService = TryStartCamera();
 
+                string myLanIp = DirectoryService.GetLocalLanIp();
                 await P2PChatService.SendVoiceSignalWithRelayAsync(callerIp, callerTcpPort,
-                    $"VIDEO_ANSWER|{_username}|{_activeVideoCall.AudioLocalPort}|{_activeVideoCall.VideoLocalPort}",
+                    $"VIDEO_ANSWER|{_username}|{_activeVideoCall.AudioLocalPort}|{_activeVideoCall.VideoLocalPort}|{myLanIp}",
                     _username, callerName);
 
                 ShowVideoCallForm(callerName, isOutgoing: false);
