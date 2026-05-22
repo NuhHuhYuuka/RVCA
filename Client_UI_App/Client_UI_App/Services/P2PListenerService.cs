@@ -103,6 +103,51 @@ namespace Client_UI_App.Services
                 string[] p = line.Split('|', 3);
                 if (p.Length == 3) GroupRenamed?.Invoke(p[1], p[2]);
             }
+            else if (line.StartsWith("GROUP_VOICE_JOIN|"))
+            {
+                // GROUP_VOICE_JOIN|groupId|username|udpPort|senderTcpPort
+                string[] p = line.Split('|', 5);
+                if (p.Length == 5
+                    && int.TryParse(p[3], out int udpPort)
+                    && int.TryParse(p[4], out int tcpPort))
+                    GroupVoiceJoined?.Invoke(p[1], p[2], senderIp, udpPort, tcpPort);
+            }
+            else if (line.StartsWith("GROUP_VOICE_REPLY|"))
+            {
+                // GROUP_VOICE_REPLY|groupId|username|udpPort
+                string[] p = line.Split('|', 4);
+                if (p.Length == 4 && int.TryParse(p[3], out int udpPort))
+                    GroupVoiceReplied?.Invoke(p[1], p[2], senderIp, udpPort);
+            }
+            else if (line.StartsWith("GROUP_VOICE_LEAVE|"))
+            {
+                string[] p = line.Split('|', 3);
+                if (p.Length == 3) GroupVoiceLeft?.Invoke(p[1], p[2]);
+            }
+            else if (line.StartsWith("GROUP_VIDEO_JOIN|"))
+            {
+                // GROUP_VIDEO_JOIN|groupId|username|audioPort|videoPort|senderTcpPort
+                string[] p = line.Split('|', 6);
+                if (p.Length == 6
+                    && int.TryParse(p[3], out int aPort)
+                    && int.TryParse(p[4], out int vPort)
+                    && int.TryParse(p[5], out int tcpPort))
+                    GroupVideoJoined?.Invoke(p[1], p[2], senderIp, aPort, vPort, tcpPort);
+            }
+            else if (line.StartsWith("GROUP_VIDEO_REPLY|"))
+            {
+                // GROUP_VIDEO_REPLY|groupId|username|audioPort|videoPort
+                string[] p = line.Split('|', 5);
+                if (p.Length == 5
+                    && int.TryParse(p[3], out int aPort)
+                    && int.TryParse(p[4], out int vPort))
+                    GroupVideoReplied?.Invoke(p[1], p[2], senderIp, aPort, vPort);
+            }
+            else if (line.StartsWith("GROUP_VIDEO_LEAVE|"))
+            {
+                string[] p = line.Split('|', 3);
+                if (p.Length == 3) GroupVideoLeft?.Invoke(p[1], p[2]);
+            }
             else if (line.StartsWith("TYPING|"))
             {
                 string[] p = line.Split('|', 2);

@@ -221,13 +221,23 @@ namespace Client_UI_App.Services
         }
 
         // ── Poll tất cả message relay chưa đọc của mình ──────────────
-        // Trả về List<(fromUser, senderPublicIp, p2pLine)>
+        // Poll song song cả AllDirPorts — relay message chỉ nằm trên 1 server
+        // nên không bị duplicate; đảm bảo nhận được dù LB route tới server nào.
         public static async Task<List<(string from, string senderIp, string line)>> PollAsync(string username)
+        {
+            var tasks = AllDirPorts.Select(port => PollFromPortAsync(username, port));
+            var results = await Task.WhenAll(tasks);
+            var merged = new List<(string, string, string)>();
+            foreach (var r in results) merged.AddRange(r);
+            return merged;
+        }
+
+        private static async Task<List<(string from, string senderIp, string line)>> PollFromPortAsync(
+            string username, int dirPort)
         {
             var result = new List<(string, string, string)>();
             try
             {
-                int dirPort = await GetDirectoryPortAsync();
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(4));
                 using TcpClient client = new();
                 await client.ConnectAsync(LbIp, dirPort, cts.Token);

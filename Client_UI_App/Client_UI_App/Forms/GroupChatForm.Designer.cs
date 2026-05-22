@@ -22,6 +22,7 @@ namespace Client_UI_App.Forms
             btnCopyId       = new Button();
             lblMembersTitle = new Label();
             listBoxMembers  = new ListBox();
+            pnlLeftActions  = new Panel();
             btnRefreshMembers = new Button();
             btnRenameGroup  = new Button();
             btnLeaveGroup   = new Button();
@@ -40,6 +41,7 @@ namespace Client_UI_App.Forms
 
             pnlLeft.SuspendLayout();
             pnlGroupIdRow.SuspendLayout();
+            pnlLeftActions.SuspendLayout();
             pnlRight.SuspendLayout();
             pnlBottom.SuspendLayout();
             pnlStatus.SuspendLayout();
@@ -117,12 +119,17 @@ namespace Client_UI_App.Forms
             lblMembersTitle.Height    = 30;
             lblMembersTitle.TextAlign = ContentAlignment.MiddleLeft;
 
-            listBoxMembers.Dock        = DockStyle.Top;
-            listBoxMembers.Height      = 240;
+            listBoxMembers.Dock        = DockStyle.Fill;
             listBoxMembers.Font        = new Font("Segoe UI", 14F);
             listBoxMembers.BorderStyle = BorderStyle.None;
             listBoxMembers.BackColor   = clrBgList;
             listBoxMembers.ForeColor   = clrTextMain;
+
+            // ── pnlLeftActions: dock bottom, chứa các nút hành động ─────
+            // Chiều cao = btnRefresh(38) + sep(13) + btnRename(38) + btnVideo(42) + btnVoice(42) + btnLeave(38) = 211
+            pnlLeftActions.Dock      = DockStyle.Bottom;
+            pnlLeftActions.Height    = 211;
+            pnlLeftActions.BackColor = clrBgLeft;
 
             btnRefreshMembers.Text      = "⟳ Làm mới";
             btnRefreshMembers.Font      = new Font("Segoe UI", 13F);
@@ -189,15 +196,19 @@ namespace Client_UI_App.Forms
             btnVideo.Cursor    = Cursors.Hand;
             btnVideo.Click    += btnVideo_Click;
 
-            // Thứ tự Add Dock=Top: LIFO (thêm sau = hiện trên)
-            pnlLeft.Controls.Add(btnLeaveGroup);
-            pnlLeft.Controls.Add(btnVoice);
-            pnlLeft.Controls.Add(btnVideo);
-            pnlLeft.Controls.Add(sep4);
-            pnlLeft.Controls.Add(div2);
-            pnlLeft.Controls.Add(sep3);
-            pnlLeft.Controls.Add(btnRenameGroup);
-            pnlLeft.Controls.Add(btnRefreshMembers);
+            // LIFO (thêm sau = hiện trên) trong pnlLeftActions
+            pnlLeftActions.Controls.Add(btnLeaveGroup);
+            pnlLeftActions.Controls.Add(btnVoice);
+            pnlLeftActions.Controls.Add(btnVideo);
+            pnlLeftActions.Controls.Add(sep4);
+            pnlLeftActions.Controls.Add(div2);
+            pnlLeftActions.Controls.Add(sep3);
+            pnlLeftActions.Controls.Add(btnRenameGroup);
+            pnlLeftActions.Controls.Add(btnRefreshMembers);
+
+            // pnlLeft: LIFO (thêm sau = hiện trên)
+            // pnlLeftActions (Dock.Bottom) và listBoxMembers (Dock.Fill) xử lý bởi layout engine
+            pnlLeft.Controls.Add(pnlLeftActions);
             pnlLeft.Controls.Add(listBoxMembers);
             pnlLeft.Controls.Add(lblMembersTitle);
             pnlLeft.Controls.Add(sep2);
@@ -310,6 +321,7 @@ namespace Client_UI_App.Forms
 
             pnlLeft.ResumeLayout(false);
             pnlGroupIdRow.ResumeLayout(false);
+            pnlLeftActions.ResumeLayout(false);
             pnlRight.ResumeLayout(false);
             pnlBottom.ResumeLayout(false);
             pnlStatus.ResumeLayout(false);
@@ -324,6 +336,7 @@ namespace Client_UI_App.Forms
         private Button      btnCopyId;
         private Label       lblMembersTitle;
         private ListBox     listBoxMembers;
+        private Panel       pnlLeftActions;
         private Button      btnRefreshMembers;
         private Button      btnRenameGroup;
         private Button      btnLeaveGroup;
