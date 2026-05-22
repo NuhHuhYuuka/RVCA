@@ -23,6 +23,8 @@ namespace Client_UI_App.Forms
         private void SwitchToLoginMode()
         {
             _isSignupMode = false;
+            pnlMain.SuspendLayout();
+            this.SuspendLayout();
 
             lblEmail.Visible = false;
             txtEmail.Visible = false;
@@ -45,12 +47,16 @@ namespace Client_UI_App.Forms
             pnlMain.Size    = new Size(360, 375);
             this.ClientSize = new Size(420, 415);
 
+            pnlMain.ResumeLayout(true);
+            this.ResumeLayout(true);
             SetStatus("Chờ đăng nhập...", _clrTextHint);
         }
 
         private void SwitchToSignupMode()
         {
             _isSignupMode = true;
+            pnlMain.SuspendLayout();
+            this.SuspendLayout();
 
             lblEmail.Visible = true;
             txtEmail.Visible = true;
@@ -71,6 +77,8 @@ namespace Client_UI_App.Forms
             pnlMain.Size    = new Size(360, 400);
             this.ClientSize = new Size(420, 440);
 
+            pnlMain.ResumeLayout(true);
+            this.ResumeLayout(true);
             SetStatus("", _clrTextHint);
         }
 
