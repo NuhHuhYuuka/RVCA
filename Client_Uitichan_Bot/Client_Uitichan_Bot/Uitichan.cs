@@ -281,7 +281,15 @@ static async Task HandlePeerConnectionAsync(TcpClient client, string secretKey)
 
         byte[] audioResponseData = Array.Empty<byte>();
         if (!string.IsNullOrWhiteSpace(responseJpText))
-            audioResponseData = await GetVoiceVoxAudioAsync(responseJpText);
+        {
+            try { audioResponseData = await GetVoiceVoxAudioAsync(responseJpText); }
+            catch
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("[VOICEVOX] Engine chưa sẵn sàng — gửi text-only.");
+                Console.ResetColor();
+            }
+        }
 
         using BinaryWriter binaryWriter = new BinaryWriter(networkStream, Encoding.UTF8, leaveOpen: true);
         string encryptedVnText = Client_Uitichan_Bot.SecurityService.Encrypt(responseVnText, secretKey);
