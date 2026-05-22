@@ -61,21 +61,24 @@ namespace Client_UI_App.Forms
             lblEmail.Visible = true;
             txtEmail.Visible = true;
 
-            lblPassword.Location = new Point(10, 210);
-            txtPassword.Location = new Point(10, 230);
-            btnPrimary.Location  = new Point(10, 280);
+            // Stack controls dynamically so positions are correct regardless of DPI
+            int pwdY = txtEmail.Bottom + 12;
+            lblPassword.Location = new Point(10, pwdY);
+            txtPassword.Location = new Point(10, lblPassword.Bottom + 3);
+            btnPrimary.Location  = new Point(10, txtPassword.Bottom + 18);
 
             btnPrimary.Text      = "Đăng ký";
             btnPrimary.BackColor = _clrAccPurple;
             btnPrimary.FlatAppearance.MouseOverBackColor = Color.FromArgb(160, 70, 240);
 
             lnkForgotPassword.Visible = false;
-            lnkToggleMode.Location    = new Point(10, 330);
+            lnkToggleMode.Location    = new Point(10, btnPrimary.Bottom + 12);
             lnkToggleMode.Text        = "Đã có tài khoản? Đăng nhập";
-            lblStatus.Location        = new Point(10, 358);
+            lblStatus.Location        = new Point(10, lnkToggleMode.Bottom + 8);
 
-            pnlMain.Size    = new Size(360, 400);
-            this.ClientSize = new Size(420, 440);
+            int panelH      = lblStatus.Bottom + 15;
+            pnlMain.Size    = new Size(360, panelH);
+            this.ClientSize = new Size(420, panelH + 40);
 
             pnlMain.ResumeLayout(true);
             this.ResumeLayout(true);

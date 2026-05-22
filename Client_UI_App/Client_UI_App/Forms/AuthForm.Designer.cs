@@ -177,7 +177,7 @@ namespace Client_UI_App.Forms
 
             // ── Form ──────────────────────────────────────────────────
             this.AutoScaleDimensions = new SizeF(7F, 15F);
-            this.AutoScaleMode       = AutoScaleMode.Font;
+            this.AutoScaleMode       = AutoScaleMode.None;
             this.BackColor           = clrBgForm;
             this.ClientSize          = new Size(420, 415);
             this.Controls.Add(pnlMain);
