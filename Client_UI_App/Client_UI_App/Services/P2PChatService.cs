@@ -35,13 +35,16 @@ namespace Client_UI_App.Services
             _botPending = new();
 
         // Gọi bởi P2PListenerService khi nhận BOT_RESPONSE từ relay poller
-        internal static void CompleteBotRelayResponse(string sessionId, string encryptedText)
+        internal static void CompleteBotRelayResponse(string sessionId, string encryptedText, string audioBase64 = "")
         {
             if (!_botPending.TryRemove(sessionId, out var tcs)) return;
             try
             {
-                string text = BotCryptService.Decrypt(encryptedText, DefaultBotKey);
-                tcs.TrySetResult((text, Array.Empty<byte>()));
+                string text  = BotCryptService.Decrypt(encryptedText, DefaultBotKey);
+                byte[] audio = string.IsNullOrEmpty(audioBase64)
+                    ? Array.Empty<byte>()
+                    : Convert.FromBase64String(audioBase64);
+                tcs.TrySetResult((text, audio));
             }
             catch (Exception ex) { tcs.TrySetException(ex); }
         }

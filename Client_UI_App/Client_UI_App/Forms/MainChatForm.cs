@@ -999,7 +999,8 @@ namespace Client_UI_App.Forms
 
                 // Kết nối TCP tới bot (dùng IP/port từ Directory Server)
                 var botTcp    = new System.Net.Sockets.TcpClient();
-                await botTcp.ConnectAsync(_peerIp, _peerPort);
+                using var connectCts = new System.Threading.CancellationTokenSource(2000);
+                await botTcp.ConnectAsync(_peerIp, _peerPort, connectCts.Token);
                 var botStream = botTcp.GetStream();
                 var botWriter = new StreamWriter(botStream, new System.Text.UTF8Encoding(false)) { AutoFlush = true };
                 var botReader = new StreamReader(botStream, System.Text.Encoding.UTF8);

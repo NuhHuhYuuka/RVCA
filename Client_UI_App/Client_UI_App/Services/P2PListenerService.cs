@@ -199,9 +199,10 @@ namespace Client_UI_App.Services
             }
             else if (line.StartsWith("BOT_RESPONSE|"))
             {
-                // BOT_RESPONSE|sessionId|encryptedText
-                string[] p = line.Split('|', 3);
-                if (p.Length == 3) P2PChatService.CompleteBotRelayResponse(p[1], p[2]);
+                // BOT_RESPONSE|sessionId|encryptedText[|audioBase64]
+                string[] p = line.Split('|', 4);
+                if (p.Length >= 3)
+                    P2PChatService.CompleteBotRelayResponse(p[1], p[2], p.Length == 4 ? p[3] : "");
             }
             else if (line.StartsWith("FILE_RELAY|"))
             {
