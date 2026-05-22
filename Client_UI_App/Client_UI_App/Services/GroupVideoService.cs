@@ -38,8 +38,10 @@ namespace Client_UI_App.Services
         // UDP sockets: một cho audio, một cho video
         private UdpClient? _audioUdp;
         private UdpClient? _videoUdp;
-        public int LocalAudioPort { get; private set; }
-        public int LocalVideoPort { get; private set; }
+        public int LocalAudioPort    { get; private set; }
+        public int LocalVideoPort    { get; private set; }
+        public int ExternalAudioPort { get; private set; }
+        public int ExternalVideoPort { get; private set; }
 
         // Peers (key = username)
         private readonly Dictionary<string, PeerState> _peers    = new();
@@ -82,13 +84,20 @@ namespace Client_UI_App.Services
         }
 
         // ── Start ─────────────────────────────────────────────────────────
-        public void Start()
+        public async Task StartAsync()
         {
-            _audioUdp     = new UdpClient(0);
+            _audioUdp = new UdpClient(0);
             LocalAudioPort = ((IPEndPoint)_audioUdp.Client.LocalEndPoint!).Port;
 
-            _videoUdp     = new UdpClient(0);
+            _videoUdp = new UdpClient(0);
             LocalVideoPort = ((IPEndPoint)_videoUdp.Client.LocalEndPoint!).Port;
+
+            // STUN: query both sockets in parallel for external port
+            var audioStun = StunDiscoverPortAsync(_audioUdp);
+            var videoStun = StunDiscoverPortAsync(_videoUdp);
+            await Task.WhenAll(audioStun, videoStun);
+            ExternalAudioPort = audioStun.Result ?? LocalAudioPort;
+            ExternalVideoPort = videoStun.Result ?? LocalVideoPort;
 
             var mixFmt = WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, Channels);
             _mixer   = new MixingSampleProvider(mixFmt) { ReadFully = true };
@@ -282,8 +291,23 @@ namespace Client_UI_App.Services
                     PeerState? peer = null;
                     lock (_lock)
                     {
-                        if (_audioKey.TryGetValue(key, out string? un))
-                            _peers.TryGetValue(un, out peer);
+                        if (!_audioKey.TryGetValue(key, out string? un) || !_peers.TryGetValue(un, out peer))
+                        {
+                            // NAT remap: find peer by IP, update audio key
+                            string strIp = addr.ToString();
+                            foreach (var kv in _peers)
+                            {
+                                if (kv.Value.AudioSendEp.Address.ToString() == strIp)
+                                {
+                                    peer = kv.Value;
+                                    _audioKey.Remove(peer.AudioRecvKey);
+                                    peer.AudioRecvKey = key;
+                                    peer.AudioSendEp  = new IPEndPoint(addr, rEp.Port);
+                                    _audioKey[key]    = kv.Key;
+                                    break;
+                                }
+                            }
+                        }
                     }
                     if (peer is null) continue;
 
@@ -324,7 +348,26 @@ namespace Client_UI_App.Services
                     string key  = $"{addr}:{rEp.Port}";
 
                     string? username = null;
-                    lock (_lock) { _videoKey.TryGetValue(key, out username); }
+                    lock (_lock)
+                    {
+                        if (!_videoKey.TryGetValue(key, out username))
+                        {
+                            // NAT remap: find peer by IP, update video key
+                            string strIp = addr.ToString();
+                            foreach (var kv in _peers)
+                            {
+                                if (kv.Value.VideoSendEp.Address.ToString() == strIp)
+                                {
+                                    username = kv.Key;
+                                    _videoKey.Remove(kv.Value.VideoRecvKey);
+                                    kv.Value.VideoRecvKey = key;
+                                    kv.Value.VideoSendEp  = new IPEndPoint(addr, rEp.Port);
+                                    _videoKey[key]        = username;
+                                    break;
+                                }
+                            }
+                        }
+                    }
                     if (username is null) continue;
 
                     byte[] data = result.Buffer;
@@ -363,6 +406,66 @@ namespace Client_UI_App.Services
             foreach (var c in ImageCodecInfo.GetImageEncoders())
                 if (c.MimeType == "image/jpeg") return c;
             throw new InvalidOperationException("JPEG codec not found");
+        }
+
+        private static async Task<int?> StunDiscoverPortAsync(UdpClient udp)
+        {
+            try { return await StunDiscoverCoreAsync(udp).WaitAsync(TimeSpan.FromSeconds(4)); }
+            catch { return null; }
+        }
+
+        private static async Task<int?> StunDiscoverCoreAsync(UdpClient udp)
+        {
+            string[] hosts = { "stun.l.google.com", "stun1.l.google.com" };
+            const int stunPort = 19302;
+            const int xorMask  = 0x2112;
+
+            foreach (string host in hosts)
+            {
+                try
+                {
+                    var addresses = await Dns.GetHostAddressesAsync(host);
+                    var ipv4 = addresses.FirstOrDefault(
+                        a => a.AddressFamily == AddressFamily.InterNetwork);
+                    if (ipv4 == null) continue;
+
+                    byte[] txId = new byte[12];
+                    new Random().NextBytes(txId);
+                    byte[] req = new byte[20];
+                    req[1] = 0x01;
+                    req[4] = 0x21; req[5] = 0x12; req[6] = 0xA4; req[7] = 0x42;
+                    Buffer.BlockCopy(txId, 0, req, 8, 12);
+
+                    await udp.SendAsync(req, req.Length, new IPEndPoint(ipv4, stunPort));
+
+                    using var recvCts = new CancellationTokenSource(2000);
+                    UdpReceiveResult resp;
+                    try { resp = await udp.ReceiveAsync(recvCts.Token); }
+                    catch { continue; }
+
+                    if (!resp.RemoteEndPoint.Address.Equals(ipv4)) continue;
+
+                    byte[] d = resp.Buffer;
+                    if (d.Length < 20 || d[0] != 0x01 || d[1] != 0x01) continue;
+
+                    int off = 20;
+                    while (off + 4 <= d.Length)
+                    {
+                        int t = (d[off] << 8) | d[off + 1];
+                        int l = (d[off + 2] << 8) | d[off + 3];
+                        off += 4;
+                        if ((t == 0x0020 || t == 0x0001) && l >= 8 && off + l <= d.Length)
+                        {
+                            int port = (d[off + 2] << 8) | d[off + 3];
+                            if (t == 0x0020) port ^= xorMask;
+                            return port & 0xFFFF;
+                        }
+                        off += l + (l % 4 != 0 ? 4 - l % 4 : 0);
+                    }
+                }
+                catch { }
+            }
+            return null;
         }
     }
 }
