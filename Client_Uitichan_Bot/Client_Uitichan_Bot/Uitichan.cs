@@ -240,9 +240,12 @@ static async Task PollBotRelayFromPortAsync(string srvIp, int dirPort, string se
             string[] outer = msgLine.Split('|', 4);
             if (outer.Length < 4) continue;
             string fromUser = outer[1];
+            string senderIp = outer[2];
             string content  = outer[3];
             if (content.StartsWith("BOT_REQUEST|"))
                 _ = Task.Run(() => HandleBotRelayRequestAsync(srvIp, fromUser, content, secretKey));
+            else if (content.StartsWith("VOICE_OFFER|"))
+                _ = Task.Run(() => HandleBotVoiceOfferRelayAsync(srvIp, fromUser, senderIp, content));
         }
     }
     catch { /* server tạm thời không kết nối được — bỏ qua */ }
@@ -306,6 +309,145 @@ static async Task HandleBotRelayRequestAsync(string srvIp, string fromUser, stri
         Console.WriteLine($"[RELAY BOT ERR] {ex.Message}");
         Console.ResetColor();
     }
+}
+
+// ── Xử lý VOICE_OFFER nhận qua relay (không có TCP trực tiếp) ────────
+// Gửi VOICE_ACCEPT qua relay → chạy voice loop với idle-timeout 90s
+static async Task HandleBotVoiceOfferRelayAsync(string srvIp, string fromUser, string senderIp, string content)
+{
+    // content: VOICE_OFFER|clientName|clientUdpPort
+    string[] parts = content.Split('|');
+    if (parts.Length < 3) return;
+    string clientName = parts[1];
+    if (!int.TryParse(parts[2], out int clientUdpPort)) return;
+
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine($"[VOICE RELAY] {clientName} bắt đầu voice call qua relay (UDP:{clientUdpPort})");
+    Console.ResetColor();
+
+    using var udpRecv = new UdpClient(0);
+    int botUdpPort    = ((IPEndPoint)udpRecv.Client.LocalEndPoint!).Port;
+    using var udpSend = new UdpClient();
+    var clientEp      = new IPEndPoint(IPAddress.Parse(senderIp), clientUdpPort);
+
+    // Gửi VOICE_ACCEPT qua relay về cả 2 Directory Server
+    int[] dirPorts = { 8888, 8889 };
+    await Task.WhenAll(dirPorts.Select(async port =>
+    {
+        try
+        {
+            using var connectCts = new CancellationTokenSource(4000);
+            using TcpClient tc = new();
+            await tc.ConnectAsync(srvIp, port, connectCts.Token);
+            using var stream = tc.GetStream();
+            stream.ReadTimeout  = 4000;
+            stream.WriteTimeout = 4000;
+            using var r = new StreamReader(stream, new UTF8Encoding(false));
+            using var w = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
+            await w.WriteLineAsync($"RELAY|UitiChan|{fromUser}|VOICE_ACCEPT|{botUdpPort}");
+            _ = await r.ReadLineAsync(); // consume RELAY_OK
+        }
+        catch { }
+    }));
+
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine($"[VOICE RELAY] Bot UDP:{botUdpPort} — đang lắng nghe...");
+    Console.ResetColor();
+
+#pragma warning disable CS0618
+    var decoder = new OpusDecoder(48000, 1);
+    var encoder = new OpusEncoder(48000, 1, OpusApplication.OPUS_APPLICATION_VOIP) { Bitrate = 24000 };
+#pragma warning restore CS0618
+
+    var  pcmBuf        = new List<short>();
+    var  cts           = new CancellationTokenSource();
+    int  silenceFrames = 0;
+    bool isRecording   = false;
+    var  lastPacket    = DateTime.UtcNow;
+    const int   MaxSilenceFrames = 30;
+    const float RmsThreshold     = 0.012f;
+
+    var recvTask = udpRecv.ReceiveAsync(cts.Token).AsTask();
+    while (!cts.Token.IsCancellationRequested)
+    {
+        if ((DateTime.UtcNow - lastPacket).TotalSeconds > 90) break;
+
+        try
+        {
+            bool gotPacket = await Task.WhenAny(recvTask, Task.Delay(25, cts.Token)) == recvTask;
+
+            if (gotPacket)
+            {
+                UdpReceiveResult recvResult;
+                try { recvResult = await recvTask; }
+                catch (OperationCanceledException) { break; }
+                catch { break; }
+                recvTask   = udpRecv.ReceiveAsync(cts.Token).AsTask();
+                lastPacket = DateTime.UtcNow;
+                clientEp   = recvResult.RemoteEndPoint;
+
+                byte[] data = recvResult.Buffer;
+                if (data.Length <= 2) continue;
+
+                short[] pcmFrame = new short[960];
+                int decoded;
+#pragma warning disable CS0618
+                try { decoded = decoder.Decode(data, 2, data.Length - 2, pcmFrame, 0, 960, false); }
+                catch { continue; }
+#pragma warning restore CS0618
+                if (decoded <= 0) continue;
+
+                double sum = 0;
+                for (int i = 0; i < decoded; i++) sum += (double)pcmFrame[i] * pcmFrame[i];
+                float rms = (float)Math.Sqrt(sum / decoded) / short.MaxValue;
+
+                if (rms >= RmsThreshold)
+                {
+                    isRecording   = true;
+                    silenceFrames = 0;
+                    pcmBuf.AddRange(pcmFrame[..decoded]);
+                    if (pcmBuf.Count >= 48000 * 10)
+                    {
+                        await ProcessVoiceTurnAsync(pcmBuf.ToArray(), StreamWriter.Null, udpSend, clientEp, encoder);
+                        pcmBuf.Clear(); silenceFrames = 0; isRecording = false;
+                    }
+                }
+                else
+                {
+                    if (isRecording)
+                    {
+                        pcmBuf.AddRange(pcmFrame[..decoded]);
+                        silenceFrames++;
+                        if (silenceFrames >= MaxSilenceFrames)
+                        {
+                            await ProcessVoiceTurnAsync(pcmBuf.ToArray(), StreamWriter.Null, udpSend, clientEp, encoder);
+                            pcmBuf.Clear(); silenceFrames = 0; isRecording = false;
+                        }
+                    }
+                    else { silenceFrames++; }
+                }
+            }
+            else
+            {
+                if (cts.Token.IsCancellationRequested) break;
+                if (isRecording && pcmBuf.Count > 0)
+                {
+                    silenceFrames++;
+                    if (silenceFrames >= MaxSilenceFrames)
+                    {
+                        await ProcessVoiceTurnAsync(pcmBuf.ToArray(), StreamWriter.Null, udpSend, clientEp, encoder);
+                        pcmBuf.Clear(); silenceFrames = 0; isRecording = false;
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException) { break; }
+        catch { break; }
+    }
+
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine($"[VOICE RELAY] Voice call relay với {clientName} kết thúc.");
+    Console.ResetColor();
 }
 
 static void StartVoiceVoxEngine()

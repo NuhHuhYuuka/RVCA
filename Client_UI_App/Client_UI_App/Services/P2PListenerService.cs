@@ -204,6 +204,13 @@ namespace Client_UI_App.Services
                 if (p.Length >= 3)
                     P2PChatService.CompleteBotRelayResponse(p[1], p[2], p.Length == 4 ? p[3] : "");
             }
+            else if (line.StartsWith("VOICE_ACCEPT|"))
+            {
+                // VOICE_ACCEPT|botUdpPort — bot reply via relay for bot voice call fallback
+                string[] p = line.Split('|', 2);
+                if (p.Length == 2 && int.TryParse(p[1], out int botPort))
+                    P2PChatService.CompleteBotVoiceAccept(senderIp, botPort);
+            }
             else if (line.StartsWith("FILE_RELAY|"))
             {
                 // FILE_RELAY|senderName|fileName|sha256|base64Data

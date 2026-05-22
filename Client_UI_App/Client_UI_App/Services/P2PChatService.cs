@@ -34,6 +34,19 @@ namespace Client_UI_App.Services
         private static readonly ConcurrentDictionary<string, TaskCompletionSource<(string text, byte[] audio)>>
             _botPending = new();
 
+        // TCS chờ VOICE_ACCEPT từ bot qua relay (chỉ 1 cuộc gọi tại 1 thời điểm)
+        private static volatile TaskCompletionSource<(string ip, int port)>? _botVoiceAcceptTcs;
+
+        public static Task<(string ip, int port)> WaitBotVoiceAcceptAsync(int timeoutMs = 15000)
+        {
+            var tcs = new TaskCompletionSource<(string, int)>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _botVoiceAcceptTcs = tcs;
+            return tcs.Task.WaitAsync(TimeSpan.FromMilliseconds(timeoutMs));
+        }
+
+        internal static void CompleteBotVoiceAccept(string botIp, int botUdpPort)
+            => _botVoiceAcceptTcs?.TrySetResult((botIp, botUdpPort));
+
         // Gọi bởi P2PListenerService khi nhận BOT_RESPONSE từ relay poller
         internal static void CompleteBotRelayResponse(string sessionId, string encryptedText, string audioBase64 = "")
         {
