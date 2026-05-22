@@ -132,9 +132,12 @@ namespace Client_UI_App.Services
                                | (data[3] <<  8) |  data[4];
                     if (jpgLen <= 0 || 5 + jpgLen > data.Length) continue;
 
+                    // GDI+ giữ reference tới stream trong lifetime của Bitmap.
+                    // Tạo bản sao độc lập để stream có thể được giải phóng an toàn.
                     Bitmap bmp;
                     using (var ms = new MemoryStream(data, 5, jpgLen))
-                        bmp = new Bitmap(ms);
+                    using (var tmp = System.Drawing.Image.FromStream(ms))
+                        bmp = new Bitmap(tmp);
 
                     RemoteFrameReceived?.Invoke(bmp);
                 }
