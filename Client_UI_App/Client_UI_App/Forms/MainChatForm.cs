@@ -219,8 +219,7 @@ namespace Client_UI_App.Forms
                 if (user == _username || user == "UitiChan") continue;
                 try
                 {
-                    int dirPort = await DirectoryService.GetDirectoryPortAsync();
-                    var (found, ipPort) = await DirectoryService.GetUserAsync(dirPort, user);
+                    var (found, ipPort) = await DirectoryService.GetUserAsync(user);
                     if (!found || string.IsNullOrEmpty(ipPort)) continue;
 
                     string[] parts = ipPort.Split(':');
@@ -520,8 +519,7 @@ namespace Client_UI_App.Forms
             try
             {
                 {
-                    int dirPort = await DirectoryService.GetDirectoryPortAsync();
-                    var (found, ipPort) = await DirectoryService.GetUserAsync(dirPort, selected);
+                    var (found, ipPort) = await DirectoryService.GetUserAsync(selected);
 
                     if (!found)
                     {

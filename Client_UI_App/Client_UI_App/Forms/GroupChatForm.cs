@@ -329,9 +329,8 @@ namespace Client_UI_App.Forms
         {
             try
             {
-                // Tra cứu IP thật của bot từ Directory Server
-                int dirPort = await DirectoryService.GetDirectoryPortAsync();
-                var (botFound, ipPort) = await DirectoryService.GetUserAsync(dirPort, "UitiChan");
+                // Tra cứu IP thật của bot — query cả 2 server
+                var (botFound, ipPort) = await DirectoryService.GetUserAsync("UitiChan");
                 if (!botFound)
                 {
                     SetStatus("UitiChan không online.", Color.OrangeRed);
@@ -759,13 +758,12 @@ namespace Client_UI_App.Forms
             _members = members;
 
             var endpoints = new List<(string, string, int)>();
-            int dirPort   = await DirectoryService.GetDirectoryPortAsync();
 
             foreach (string member in members)
             {
                 if (member == _myUsername) continue;
 
-                var (userFound, ipPort) = await DirectoryService.GetUserAsync(dirPort, member);
+                var (userFound, ipPort) = await DirectoryService.GetUserAsync(member);
                 if (!userFound || string.IsNullOrEmpty(ipPort)) continue;
 
                 string[] ipParts = ipPort.Split(':');

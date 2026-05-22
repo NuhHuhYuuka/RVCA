@@ -139,26 +139,42 @@ namespace Client_UI_App.Services
             return (false, errMsg, new List<string>());
         }
 
-        // ── Lấy IP:Port của một user đang online ──
-        // Gửi: GETUSER|username
-        public static async Task<(bool found, string ipPort)> GetUserAsync(int dirPort, string username)
+        // ── Lấy IP:Port của một user — query song song cả 2 server ──
+        // User có thể login vào bất kỳ server nào; query cả 2 đảm bảo tìm thấy.
+        public static async Task<(bool found, string ipPort)> GetUserAsync(string username)
         {
-            using TcpClient client = new();
-            await client.ConnectAsync(LbIp, dirPort);
+            var tasks   = AllDirPorts.Select(port => GetUserFromPortAsync(port, username));
+            var results = await Task.WhenAll(tasks);
+            var match   = results.FirstOrDefault(r => r.found);
+            return match.found ? match : (false, string.Empty);
+        }
 
-            await using NetworkStream stream = client.GetStream();
-            using StreamReader  reader = new(stream, Encoding.UTF8, leaveOpen: true);
-            await using StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+        private static async Task<(bool found, string ipPort)> GetUserFromPortAsync(int dirPort, string username)
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                using TcpClient client = new();
+                await client.ConnectAsync(LbIp, dirPort, cts.Token);
 
-            await writer.WriteLineAsync($"GETUSER|{username}");
+                await using NetworkStream stream = client.GetStream();
+                using StreamReader  reader = new(stream, Encoding.UTF8, leaveOpen: true);
+                await using StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
 
-            string response = await reader.ReadLineAsync() ?? string.Empty;
-            string[] parts  = response.Split('|');
+                await writer.WriteLineAsync($"GETUSER|{username}");
+                string response = await reader.ReadLineAsync() ?? string.Empty;
+                string[] parts  = response.Split('|');
 
-            if (parts[0] == "GETUSER_SUCCESS" && parts.Length > 1)
-                return (true, parts[1]);
+                if (parts[0] == "GETUSER_SUCCESS" && parts.Length > 1)
+                    return (true, parts[1]);
+            }
+            catch { }
             return (false, string.Empty);
         }
+
+        // Overload cũ (giữ để tương thích với code cũ nếu có)
+        public static async Task<(bool found, string ipPort)> GetUserAsync(int dirPort, string username)
+            => await GetUserFromPortAsync(dirPort, username);
 
         // ── Làm mới danh sách user online (query song song cả 2 server, merge kết quả) ──
         public static async Task<List<string>> GetOnlineUsersAsync(int _)
