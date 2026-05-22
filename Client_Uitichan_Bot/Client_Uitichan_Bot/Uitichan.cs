@@ -700,6 +700,9 @@ static async Task HandleVoiceCallAsync(
                 // Bắt đầu nhận packet tiếp theo ngay lập tức
                 recvTask = udpRecv.ReceiveAsync(cts.Token).AsTask();
 
+                // Cập nhật endpoint thực tế (NAT có thể remap port so với VOICE_OFFER)
+                clientEp = recvResult.RemoteEndPoint;
+
                 byte[] data = recvResult.Buffer;
                 if (data.Length <= 2) continue;
 
