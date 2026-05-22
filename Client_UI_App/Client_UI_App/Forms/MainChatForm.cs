@@ -991,24 +991,23 @@ namespace Client_UI_App.Forms
         {
             btnCall.Enabled = false;
             SetStatus("Đang kết nối voice call với UitiChan...", Color.DodgerBlue);
+
+            _activecall = new VoiceCallService();
+            _callPeer   = "UitiChan";
+            int localUdpPort = _activecall.PrepareUdp();
+
+            // ── Direct TCP path ───────────────────────────────────────
+            bool directOk = false;
             try
             {
-                _activecall = new VoiceCallService();
-                _callPeer   = "UitiChan";
-                int localUdpPort = _activecall.PrepareUdp();
-
-                // Kết nối TCP tới bot (dùng IP/port từ Directory Server)
-                var botTcp    = new System.Net.Sockets.TcpClient();
+                var botTcp = new System.Net.Sockets.TcpClient();
                 using var connectCts = new System.Threading.CancellationTokenSource(2000);
                 await botTcp.ConnectAsync(_peerIp, _peerPort, connectCts.Token);
                 var botStream = botTcp.GetStream();
                 var botWriter = new StreamWriter(botStream, new System.Text.UTF8Encoding(false)) { AutoFlush = true };
                 var botReader = new StreamReader(botStream, System.Text.Encoding.UTF8);
 
-                // Gửi VOICE_OFFER
                 await botWriter.WriteLineAsync($"VOICE_OFFER|{_username}|{localUdpPort}");
-
-                // Đọc VOICE_ACCEPT|botUdpPort
                 string? acceptLine = await botReader.ReadLineAsync();
                 if (acceptLine == null || !acceptLine.StartsWith("VOICE_ACCEPT|"))
                 {
@@ -1020,16 +1019,12 @@ namespace Client_UI_App.Forms
 
                 int botUdpPort = int.Parse(acceptLine.Split('|')[1]);
                 _activecall.SetRemoteEndpoint(_peerIp, botUdpPort);
-
-                // Lưu lại để cleanup khi hang up
                 _botCallTcp    = botTcp;
                 _botCallWriter = botWriter;
 
-                // Hiển thị form với subtitle panel
                 ShowCallForm("UitiChan", isOutgoing: false, isBotCall: true);
                 _activecall.StartAudio();
 
-                // Background: đọc VOICE_CAPTION từ bot TCP và hiển thị subtitle
                 _ = Task.Run(async () =>
                 {
                     try
@@ -1054,14 +1049,33 @@ namespace Client_UI_App.Forms
                 });
 
                 SetStatus("Đang gọi UitiChan ♪", Color.SeaGreen);
+                directOk = true;
+            }
+            catch { }
+
+            if (directOk) return;
+
+            // ── Relay fallback (TCP không reach được bot) ─────────────
+            try
+            {
+                SetStatus("Kết nối qua relay đến UitiChan...", Color.DodgerBlue);
+                var acceptTask = P2PChatService.WaitBotVoiceAcceptAsync(15000);
+                await DirectoryService.RelayAsync(_username, "UitiChan",
+                    $"VOICE_OFFER|{_username}|{localUdpPort}");
+                var (botIp, botUdpPort) = await acceptTask;
+
+                _activecall.SetRemoteEndpoint(botIp, botUdpPort);
+                _botCallTcp    = null;
+                _botCallWriter = null;
+
+                ShowCallForm("UitiChan", isOutgoing: false, isBotCall: true);
+                _activecall.StartAudio();
+                SetStatus("Đang gọi UitiChan (relay) ♪", Color.SeaGreen);
             }
             catch (Exception ex)
             {
                 _activecall?.Stop();
-                _activecall    = null;
-                _botCallTcp?.Close();
-                _botCallTcp    = null;
-                _botCallWriter = null;
+                _activecall = null;
                 SetStatus($"Lỗi bot call: {ex.Message}", Color.Crimson);
                 btnCall.Enabled = true;
             }

@@ -436,7 +436,7 @@ namespace Client_UI_App.Forms
             try
             {
                 _voiceService = new GroupVoiceService();
-                int myUdp = _voiceService.Start();
+                int myUdp = await _voiceService.StartAsync();
 
                 _voiceMembers.Add(_myUsername);
                 UpdateVoiceButton();
@@ -507,7 +507,7 @@ namespace Client_UI_App.Forms
             {
                 _voiceService.AddPeer(peerName, peerIp, peerUdpPort);
                 _ = GroupChatService.SendVoiceReplyAsync(
-                    peerIp, peerTcpPort, _groupId, _myUsername, _voiceService.LocalUdpPort,
+                    peerIp, peerTcpPort, _groupId, _myUsername, _voiceService.ExternalUdpPort,
                     _myUsername, peerName);
             }
         }
@@ -596,7 +596,7 @@ namespace Client_UI_App.Forms
             try
             {
                 _videoService = new GroupVideoService();
-                _videoService.Start();
+                await _videoService.StartAsync();
 
                 _videoCapture = TryStartCamera();
 
@@ -610,7 +610,7 @@ namespace Client_UI_App.Forms
                 if (endpoints.Count > 0)
                     await GroupChatService.BroadcastVideoJoinAsync(
                         _groupId, _myUsername,
-                        _videoService.LocalAudioPort, _videoService.LocalVideoPort,
+                        _videoService.ExternalAudioPort, _videoService.ExternalVideoPort,
                         P2PListenerService.ListeningPort, endpoints);
 
                 SetStatus($"📹 Video  ({_videoMembers.Count} người)", Color.FromArgb(80, 150, 230));
@@ -688,7 +688,7 @@ namespace Client_UI_App.Forms
                 _videoService.AddPeer(peerName, peerIp, peerAudio, peerVideo);
                 _ = GroupChatService.SendVideoReplyAsync(
                     peerIp, peerTcpPort, _groupId, _myUsername,
-                    _videoService.LocalAudioPort, _videoService.LocalVideoPort,
+                    _videoService.ExternalAudioPort, _videoService.ExternalVideoPort,
                     _myUsername, peerName);
             }
         }
