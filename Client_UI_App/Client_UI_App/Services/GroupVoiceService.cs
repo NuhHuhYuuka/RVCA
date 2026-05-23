@@ -58,7 +58,8 @@ namespace Client_UI_App.Services
         public bool IsMuted        { get => _muted; set => _muted = value; }
         public int  PeerCount      { get { lock (_peersLock) return _peers.Count; } }
 
-        public event Action<float>? MicLevelChanged;
+        public event Action<float>?          MicLevelChanged;
+        public event Action<string, float>?  PeerLevelChanged;  // (peerName, rmsLevel)
 
         private sealed class PeerState
         {
@@ -291,6 +292,7 @@ namespace Client_UI_App.Services
                     byte[] pcmBytes = new byte[decoded * 2];
                     Buffer.BlockCopy(pcm, 0, pcmBytes, 0, pcmBytes.Length);
                     peer.Buffer.AddSamples(pcmBytes, 0, pcmBytes.Length);
+                    PeerLevelChanged?.Invoke(peer.Username, ComputeRms(pcm, decoded));
                 }
                 catch (OperationCanceledException) { break; }
                 catch { }

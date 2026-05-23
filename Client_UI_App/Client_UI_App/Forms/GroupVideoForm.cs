@@ -14,7 +14,8 @@ namespace Client_UI_App.Forms
         private readonly VideoCaptureService? _capture;
 
         // tiles: key = peerName, value = PictureBox hiển thị
-        private readonly Dictionary<string, PictureBox> _tiles = new();
+        private readonly Dictionary<string, PictureBox> _tiles      = new();
+        private readonly Dictionary<string, Label>      _tileLabels = new();
 
         // Frame throttle cho camera local
         private DateTime _lastLocalFrame = DateTime.MinValue;
@@ -41,8 +42,9 @@ namespace Client_UI_App.Forms
             // Tile của mình
             AddTile(_myUsername, isSelf: true);
 
-            _svc.FrameReceived   += OnRemoteFrame;
-            _svc.MicLevelChanged += OnMicLevel;
+            _svc.FrameReceived    += OnRemoteFrame;
+            _svc.MicLevelChanged  += OnMicLevel;
+            _svc.PeerLevelChanged += OnPeerLevel;
 
             if (_capture != null)
             {
@@ -74,6 +76,7 @@ namespace Client_UI_App.Forms
             var container = pic.Parent;
             flowTiles.Controls.Remove(container!);
             _tiles.Remove(peerName);
+            _tileLabels.Remove(peerName);
             container?.Dispose();
         }
 
@@ -132,6 +135,27 @@ namespace Client_UI_App.Forms
             try { Invoke(() => pbMic.Value = Math.Min((int)(level * 1000), 1000)); } catch { }
         }
 
+        private void OnPeerLevel(string username, float level)
+        {
+            if (IsDisposed) return;
+            if (!_tileLabels.TryGetValue(username, out var lbl)) return;
+            bool speaking = level > 0.015f;
+            try
+            {
+                BeginInvoke(() =>
+                {
+                    if (lbl.IsDisposed) return;
+                    lbl.BackColor = speaking
+                        ? Color.FromArgb(20, 60, 35)
+                        : Color.FromArgb(20, 20, 32);
+                    lbl.ForeColor = speaking
+                        ? Color.FromArgb(80, 220, 120)
+                        : Color.FromArgb(80, 150, 230);
+                });
+            }
+            catch { }
+        }
+
         // ── Tạo 1 tile (panel + picturebox + label) ───────────────────────
         private void AddTile(string name, bool isSelf)
         {
@@ -169,7 +193,8 @@ namespace Client_UI_App.Forms
             tile.Controls.Add(pic);
             tile.Controls.Add(lbl);
             flowTiles.Controls.Add(tile);
-            _tiles[name] = pic;
+            _tiles[name]      = pic;
+            _tileLabels[name] = lbl;
         }
 
         // ── Nút bấm ──────────────────────────────────────────────────────
@@ -201,8 +226,9 @@ namespace Client_UI_App.Forms
 
         private void GroupVideoForm_FormClosing(object? sender, FormClosingEventArgs e)
         {
-            _svc.FrameReceived   -= OnRemoteFrame;
-            _svc.MicLevelChanged -= OnMicLevel;
+            _svc.FrameReceived    -= OnRemoteFrame;
+            _svc.MicLevelChanged  -= OnMicLevel;
+            _svc.PeerLevelChanged -= OnPeerLevel;
 
             if (_capture != null)
                 _capture.FrameCaptured -= OnLocalFrame;

@@ -454,6 +454,7 @@ namespace Client_UI_App.Forms
                 foreach (var (peerName, (peerIp, peerUdp, peerTcp)) in _pendingVoiceJoins)
                 {
                     _voiceService.AddPeer(peerName, peerIp, peerUdp);
+                    _voiceForm?.AddMember(peerName);
                     AppendChat($"[Voice] Kết nối {peerName} → {peerIp}:{peerUdp}", Color.FromArgb(0, 180, 130));
                     _ = GroupChatService.SendVoiceReplyAsync(
                         peerIp, peerTcp, _groupId, _myUsername, myUdp, _myUsername, peerName);
@@ -559,8 +560,8 @@ namespace Client_UI_App.Forms
             if (InvokeRequired) { Invoke(() => OnGroupVoiceLeft(groupId, peerName)); return; }
 
             _voiceMembers.Remove(peerName);
-            _pendingVoiceJoins.Remove(peerName);
             _voiceService?.RemovePeer(peerName);
+            // Không xóa _pendingVoiceJoins — LEAVE có thể đến trễ hơn JOIN mới do relay thứ tự không đảm bảo
             _voiceForm?.RemoveMember(peerName);
             UpdateVoiceButton();
             AppendChat($"[Voice] {peerName} đã rời voice channel", Color.FromArgb(200, 100, 100));
@@ -634,6 +635,7 @@ namespace Client_UI_App.Forms
                 foreach (var (peerName, (peerIp, peerAudio, peerVideo, peerTcp)) in _pendingVideoJoins)
                 {
                     _videoService.AddPeer(peerName, peerIp, peerAudio, peerVideo);
+                    _videoForm?.AddPeerTile(peerName);
                     AppendChat($"[Video] Kết nối {peerName} → {peerIp} audio:{peerAudio} video:{peerVideo}", Color.FromArgb(80, 150, 230));
                     _ = GroupChatService.SendVideoReplyAsync(
                         peerIp, peerTcp, _groupId, _myUsername,
@@ -761,8 +763,8 @@ namespace Client_UI_App.Forms
             if (InvokeRequired) { Invoke(() => OnGroupVideoLeft(groupId, peerName)); return; }
 
             _videoMembers.Remove(peerName);
-            _pendingVideoJoins.Remove(peerName);
             _videoService?.RemovePeer(peerName);
+            // Không xóa _pendingVideoJoins — LEAVE có thể đến trễ hơn JOIN mới do relay thứ tự không đảm bảo
             _videoForm?.RemovePeerTile(peerName);
             UpdateVideoButton();
             AppendChat($"[Video] {peerName} đã rời video channel", Color.FromArgb(200, 100, 100));

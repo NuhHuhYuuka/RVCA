@@ -27,7 +27,8 @@ namespace Client_UI_App.Forms
         {
             base.OnLoad(e);
             AddMember(_myUsername);
-            _svc.MicLevelChanged += OnMicLevel;
+            _svc.MicLevelChanged  += OnMicLevel;
+            _svc.PeerLevelChanged += OnPeerLevel;
         }
 
         // ── Thêm thành viên vào danh sách ────────────────────────────
@@ -74,6 +75,27 @@ namespace Client_UI_App.Forms
             try { Invoke(() => pbMic.Value = Math.Min((int)(level * 1000), 1000)); } catch { }
         }
 
+        private void OnPeerLevel(string username, float level)
+        {
+            if (IsDisposed) return;
+            if (!_memberLabels.TryGetValue(username, out var lbl)) return;
+            bool speaking = level > 0.015f;
+            try
+            {
+                BeginInvoke(() =>
+                {
+                    if (lbl.IsDisposed) return;
+                    lbl.BackColor = speaking
+                        ? Color.FromArgb(20, 60, 35)
+                        : Color.FromArgb(28, 28, 42);
+                    lbl.ForeColor = speaking
+                        ? Color.FromArgb(80, 220, 120)
+                        : Color.FromArgb(200, 200, 220);
+                });
+            }
+            catch { }
+        }
+
         private void btnMute_Click(object? sender, EventArgs e)
         {
             _svc.IsMuted   = !_svc.IsMuted;
@@ -89,7 +111,8 @@ namespace Client_UI_App.Forms
 
         private void GroupVoiceForm_FormClosing(object? sender, FormClosingEventArgs e)
         {
-            _svc.MicLevelChanged -= OnMicLevel;
+            _svc.MicLevelChanged  -= OnMicLevel;
+            _svc.PeerLevelChanged -= OnPeerLevel;
         }
     }
 }
