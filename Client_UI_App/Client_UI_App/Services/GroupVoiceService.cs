@@ -72,15 +72,19 @@ namespace Client_UI_App.Services
         }
 
         // ─────────────────────────────────────────────────────────────
-        //  Start — khởi tạo toàn bộ audio pipeline + STUN discovery
+        //  Start — khởi tạo toàn bộ audio pipeline
+        //  Quan trọng: _mixer phải được khởi tạo trước khi bất kỳ AddPeer nào được gọi.
+        //  Trước đây STUN tạo ra race condition: _mixer == null trong khi JOIN từ peer
+        //  có thể đến trong suốt 4 giây chờ STUN, dẫn đến audio buffer của peer không
+        //  bao giờ được đưa vào mixer và không nghe được âm thanh.
         // ─────────────────────────────────────────────────────────────
-        public async Task<int> StartAsync()
+        public Task<int> StartAsync()
         {
             _udp = new UdpClient(0);
             LocalUdpPort    = ((IPEndPoint)_udp.Client.LocalEndPoint!).Port;
-            ExternalUdpPort = await StunDiscoverPortAsync(_udp) ?? LocalUdpPort;
+            ExternalUdpPort = LocalUdpPort;
 
-            // Output: mixer → WaveOut
+            // Output: mixer → WaveOut — phải khởi tạo TRƯỚC khi trả về để AddPeer an toàn
             var mixFmt = WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, Channels);
             _mixer   = new MixingSampleProvider(mixFmt) { ReadFully = true };
             _waveOut = new WaveOutEvent { DesiredLatency = 150 };
@@ -107,7 +111,7 @@ namespace Client_UI_App.Services
             _cts = new CancellationTokenSource();
             _ = Task.Run(() => ReceiveLoopAsync(_cts.Token));
 
-            return ExternalUdpPort;
+            return Task.FromResult(ExternalUdpPort);
         }
 
         // ─────────────────────────────────────────────────────────────
@@ -298,70 +302,5 @@ namespace Client_UI_App.Services
             return (float)Math.Sqrt(sum / count) / short.MaxValue;
         }
 
-        // ── STUN Binding Request → lấy external UDP port qua NAT ────
-        private static async Task<int?> StunDiscoverPortAsync(UdpClient udp)
-        {
-            try
-            {
-                return await StunDiscoverCoreAsync(udp).WaitAsync(TimeSpan.FromSeconds(4));
-            }
-            catch { return null; }
-        }
-
-        private static async Task<int?> StunDiscoverCoreAsync(UdpClient udp)
-        {
-            string[] hosts = { "stun.l.google.com", "stun1.l.google.com" };
-            const int stunPort = 19302;
-            const int xorMask  = 0x2112; // magic cookie high 2 bytes
-
-            foreach (string host in hosts)
-            {
-                try
-                {
-                    var addresses = await Dns.GetHostAddressesAsync(host);
-                    var ipv4 = addresses.FirstOrDefault(
-                        a => a.AddressFamily == AddressFamily.InterNetwork);
-                    if (ipv4 == null) continue;
-
-                    // 20-byte STUN Binding Request
-                    byte[] txId = new byte[12];
-                    new Random().NextBytes(txId);
-                    byte[] req = new byte[20];
-                    req[1] = 0x01;                                          // type = 0x0001
-                    req[4] = 0x21; req[5] = 0x12; req[6] = 0xA4; req[7] = 0x42; // magic
-                    Buffer.BlockCopy(txId, 0, req, 8, 12);
-
-                    await udp.SendAsync(req, req.Length, new IPEndPoint(ipv4, stunPort));
-
-                    using var recvCts = new CancellationTokenSource(2000);
-                    UdpReceiveResult resp;
-                    try { resp = await udp.ReceiveAsync(recvCts.Token); }
-                    catch { continue; }
-
-                    // Verify source is the STUN server
-                    if (!resp.RemoteEndPoint.Address.Equals(ipv4)) continue;
-
-                    byte[] d = resp.Buffer;
-                    if (d.Length < 20 || d[0] != 0x01 || d[1] != 0x01) continue; // Binding Response
-
-                    int off = 20;
-                    while (off + 4 <= d.Length)
-                    {
-                        int t = (d[off] << 8) | d[off + 1];
-                        int l = (d[off + 2] << 8) | d[off + 3];
-                        off += 4;
-                        if ((t == 0x0020 || t == 0x0001) && l >= 8 && off + l <= d.Length)
-                        {
-                            int port = (d[off + 2] << 8) | d[off + 3];
-                            if (t == 0x0020) port ^= xorMask; // XOR-MAPPED-ADDRESS
-                            return port & 0xFFFF;
-                        }
-                        off += l + (l % 4 != 0 ? 4 - l % 4 : 0); // 4-byte padding
-                    }
-                }
-                catch { }
-            }
-            return null;
-        }
     }
 }

@@ -84,20 +84,16 @@ namespace Client_UI_App.Services
         }
 
         // ── Start ─────────────────────────────────────────────────────────
-        public async Task StartAsync()
+        // _mixer phải khởi tạo TRƯỚC khi trả về để AddPeer an toàn (tránh race condition)
+        public Task StartAsync()
         {
             _audioUdp = new UdpClient(0);
-            LocalAudioPort = ((IPEndPoint)_audioUdp.Client.LocalEndPoint!).Port;
+            LocalAudioPort    = ((IPEndPoint)_audioUdp.Client.LocalEndPoint!).Port;
+            ExternalAudioPort = LocalAudioPort;
 
             _videoUdp = new UdpClient(0);
-            LocalVideoPort = ((IPEndPoint)_videoUdp.Client.LocalEndPoint!).Port;
-
-            // STUN: query both sockets in parallel for external port
-            var audioStun = StunDiscoverPortAsync(_audioUdp);
-            var videoStun = StunDiscoverPortAsync(_videoUdp);
-            await Task.WhenAll(audioStun, videoStun);
-            ExternalAudioPort = audioStun.Result ?? LocalAudioPort;
-            ExternalVideoPort = videoStun.Result ?? LocalVideoPort;
+            LocalVideoPort    = ((IPEndPoint)_videoUdp.Client.LocalEndPoint!).Port;
+            ExternalVideoPort = LocalVideoPort;
 
             var mixFmt = WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, Channels);
             _mixer   = new MixingSampleProvider(mixFmt) { ReadFully = true };
@@ -123,6 +119,8 @@ namespace Client_UI_App.Services
             _cts = new CancellationTokenSource();
             _ = Task.Run(() => AudioReceiveLoopAsync(_cts.Token));
             _ = Task.Run(() => VideoReceiveLoopAsync(_cts.Token));
+
+            return Task.CompletedTask;
         }
 
         // ── AddPeer ───────────────────────────────────────────────────────
@@ -408,64 +406,5 @@ namespace Client_UI_App.Services
             throw new InvalidOperationException("JPEG codec not found");
         }
 
-        private static async Task<int?> StunDiscoverPortAsync(UdpClient udp)
-        {
-            try { return await StunDiscoverCoreAsync(udp).WaitAsync(TimeSpan.FromSeconds(4)); }
-            catch { return null; }
-        }
-
-        private static async Task<int?> StunDiscoverCoreAsync(UdpClient udp)
-        {
-            string[] hosts = { "stun.l.google.com", "stun1.l.google.com" };
-            const int stunPort = 19302;
-            const int xorMask  = 0x2112;
-
-            foreach (string host in hosts)
-            {
-                try
-                {
-                    var addresses = await Dns.GetHostAddressesAsync(host);
-                    var ipv4 = addresses.FirstOrDefault(
-                        a => a.AddressFamily == AddressFamily.InterNetwork);
-                    if (ipv4 == null) continue;
-
-                    byte[] txId = new byte[12];
-                    new Random().NextBytes(txId);
-                    byte[] req = new byte[20];
-                    req[1] = 0x01;
-                    req[4] = 0x21; req[5] = 0x12; req[6] = 0xA4; req[7] = 0x42;
-                    Buffer.BlockCopy(txId, 0, req, 8, 12);
-
-                    await udp.SendAsync(req, req.Length, new IPEndPoint(ipv4, stunPort));
-
-                    using var recvCts = new CancellationTokenSource(2000);
-                    UdpReceiveResult resp;
-                    try { resp = await udp.ReceiveAsync(recvCts.Token); }
-                    catch { continue; }
-
-                    if (!resp.RemoteEndPoint.Address.Equals(ipv4)) continue;
-
-                    byte[] d = resp.Buffer;
-                    if (d.Length < 20 || d[0] != 0x01 || d[1] != 0x01) continue;
-
-                    int off = 20;
-                    while (off + 4 <= d.Length)
-                    {
-                        int t = (d[off] << 8) | d[off + 1];
-                        int l = (d[off + 2] << 8) | d[off + 3];
-                        off += 4;
-                        if ((t == 0x0020 || t == 0x0001) && l >= 8 && off + l <= d.Length)
-                        {
-                            int port = (d[off + 2] << 8) | d[off + 3];
-                            if (t == 0x0020) port ^= xorMask;
-                            return port & 0xFFFF;
-                        }
-                        off += l + (l % 4 != 0 ? 4 - l % 4 : 0);
-                    }
-                }
-                catch { }
-            }
-            return null;
-        }
     }
 }

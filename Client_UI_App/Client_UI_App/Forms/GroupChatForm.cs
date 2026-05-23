@@ -441,7 +441,7 @@ namespace Client_UI_App.Forms
 
                 _voiceMembers.Add(_myUsername);
                 UpdateVoiceButton();
-                AppendChat($"[Voice] Bạn đã tham gia voice channel", Color.FromArgb(0, 200, 150));
+                AppendChat($"[Voice] Bạn đã tham gia voice channel (UDP :{myUdp})", Color.FromArgb(0, 200, 150));
 
                 ShowVoiceForm();
 
@@ -500,7 +500,7 @@ namespace Client_UI_App.Forms
 
             _voiceMembers.Add(peerName);
             UpdateVoiceButton();
-            AppendChat($"[Voice] {peerName} đã tham gia voice channel", Color.FromArgb(0, 200, 150));
+            AppendChat($"[Voice] {peerName} tham gia → {peerIp}:{peerUdpPort}", Color.FromArgb(0, 200, 150));
             _voiceForm?.AddMember(peerName);
 
             // Nếu mình đang trong voice channel → thêm peer và reply UDP port
@@ -525,7 +525,7 @@ namespace Client_UI_App.Forms
 
             _voiceMembers.Add(peerName);
             UpdateVoiceButton();
-            AppendChat($"[Voice] {peerName} đang trong voice channel", Color.FromArgb(0, 200, 150));
+            AppendChat($"[Voice] {peerName} reply → {peerIp}:{peerUdpPort}", Color.FromArgb(0, 200, 150));
             _voiceForm?.AddMember(peerName);
 
             _voiceService?.AddPeer(peerName, peerIp, peerUdpPort);
@@ -597,13 +597,13 @@ namespace Client_UI_App.Forms
             try
             {
                 _videoService = new GroupVideoService();
-                await _videoService.StartAsync(); // STUN kept for future cross-NAT use
+                await _videoService.StartAsync();
 
                 _videoCapture = TryStartCamera();
 
                 _videoMembers.Add(_myUsername);
                 UpdateVideoButton();
-                AppendChat("[Video] Bạn đã tham gia video channel", Color.FromArgb(80, 150, 230));
+                AppendChat($"[Video] Bạn đã tham gia video channel (audio:{_videoService.LocalAudioPort} video:{_videoService.LocalVideoPort})", Color.FromArgb(80, 150, 230));
 
                 ShowVideoForm();
 
@@ -681,7 +681,7 @@ namespace Client_UI_App.Forms
 
             _videoMembers.Add(peerName);
             UpdateVideoButton();
-            AppendChat($"[Video] {peerName} đã tham gia video channel", Color.FromArgb(80, 150, 230));
+            AppendChat($"[Video] {peerName} tham gia → {peerIp} audio:{peerAudio} video:{peerVideo}", Color.FromArgb(80, 150, 230));
             _videoForm?.AddPeerTile(peerName);
 
             if (_videoService != null)
@@ -707,7 +707,7 @@ namespace Client_UI_App.Forms
 
             _videoMembers.Add(peerName);
             UpdateVideoButton();
-            AppendChat($"[Video] {peerName} đang trong video channel", Color.FromArgb(80, 150, 230));
+            AppendChat($"[Video] {peerName} reply → {peerIp} audio:{peerAudio} video:{peerVideo}", Color.FromArgb(80, 150, 230));
             _videoForm?.AddPeerTile(peerName);
             _videoService?.AddPeer(peerName, peerIp, peerAudio, peerVideo);
         }
