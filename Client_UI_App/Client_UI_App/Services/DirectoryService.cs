@@ -128,7 +128,7 @@ namespace Client_UI_App.Services
         }
 
         // Lấy IP mà máy này dùng để kết nối server (Tailscale IP nếu dùng VPN)
-        // Dùng UDP trick tới LbIp — đảm bảo lấy đúng interface khi có Tailscale
+        // UDP trick tới LbIp — nếu trả về loopback (máy chính là server), scan adapter Tailscale
         public static string GetIpFacingServer()
         {
             try
@@ -137,8 +137,37 @@ namespace Client_UI_App.Services
                 socket.Connect(LbIp, 65530);
                 string ip = ((System.Net.IPEndPoint)socket.LocalEndPoint!).Address.ToString();
                 if (!ip.StartsWith("127.") && ip != "::1") return ip;
+                // loopback → đây là máy chủ, cần scan Tailscale adapter trực tiếp
             }
             catch { }
+
+            // Scan adapter Tailscale: ưu tiên theo tên, fallback CGNAT 100.64.0.0/10
+            try
+            {
+                string? cgnatIp = null;
+                foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
+                    bool named = ni.Name.IndexOf("Tailscale", StringComparison.OrdinalIgnoreCase) >= 0
+                              || ni.Description.IndexOf("Tailscale", StringComparison.OrdinalIgnoreCase) >= 0;
+                    foreach (var ua in ni.GetIPProperties().UnicastAddresses)
+                    {
+                        if (ua.Address.AddressFamily != AddressFamily.InterNetwork) continue;
+                        string addr = ua.Address.ToString();
+                        if (addr.StartsWith("127.")) continue;
+                        if (named) return addr;
+                        if (cgnatIp == null && addr.StartsWith("100."))
+                        {
+                            string[] p = addr.Split('.');
+                            if (p.Length == 4 && int.TryParse(p[1], out int b) && b >= 64 && b <= 127)
+                                cgnatIp = addr;
+                        }
+                    }
+                }
+                if (cgnatIp != null) return cgnatIp;
+            }
+            catch { }
+
             return GetLocalLanIp();
         }
 

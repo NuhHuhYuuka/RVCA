@@ -256,10 +256,13 @@ namespace Client_UI_App.Services
                     {
                         if (!_peers.TryGetValue(key, out peer))
                         {
-                            // NAT remap: find peer by IP, update key to actual source port
+                            // NAT remap: tìm theo IP trước, fallback theo port (Tailscale vs LAN IP change)
                             string strIp = addr.ToString();
                             var match = _peers.FirstOrDefault(kv =>
                                 kv.Value.SendEp.Address.ToString() == strIp);
+                            if (match.Value == null)
+                                match = _peers.FirstOrDefault(kv =>
+                                    kv.Value.SendEp.Port == rEp.Port);
                             if (match.Value != null)
                             {
                                 peer = match.Value;

@@ -291,19 +291,28 @@ namespace Client_UI_App.Services
                     {
                         if (!_audioKey.TryGetValue(key, out string? un) || !_peers.TryGetValue(un, out peer))
                         {
-                            // NAT remap: find peer by IP, update audio key
+                            // NAT remap: tìm theo IP trước, fallback theo port (Tailscale vs LAN IP change)
                             string strIp = addr.ToString();
+                            string? remapUsername = null;
                             foreach (var kv in _peers)
                             {
                                 if (kv.Value.AudioSendEp.Address.ToString() == strIp)
+                                { peer = kv.Value; remapUsername = kv.Key; break; }
+                            }
+                            if (peer == null)
+                            {
+                                foreach (var kv in _peers)
                                 {
-                                    peer = kv.Value;
-                                    _audioKey.Remove(peer.AudioRecvKey);
-                                    peer.AudioRecvKey = key;
-                                    peer.AudioSendEp  = new IPEndPoint(addr, rEp.Port);
-                                    _audioKey[key]    = kv.Key;
-                                    break;
+                                    if (kv.Value.AudioSendEp.Port == rEp.Port)
+                                    { peer = kv.Value; remapUsername = kv.Key; break; }
                                 }
+                            }
+                            if (peer != null && remapUsername != null)
+                            {
+                                _audioKey.Remove(peer.AudioRecvKey);
+                                peer.AudioRecvKey = key;
+                                peer.AudioSendEp  = new IPEndPoint(addr, rEp.Port);
+                                _audioKey[key]    = remapUsername;
                             }
                         }
                     }
@@ -350,7 +359,7 @@ namespace Client_UI_App.Services
                     {
                         if (!_videoKey.TryGetValue(key, out username))
                         {
-                            // NAT remap: find peer by IP, update video key
+                            // NAT remap: tìm theo IP trước, fallback theo port (Tailscale vs LAN IP change)
                             string strIp = addr.ToString();
                             foreach (var kv in _peers)
                             {
@@ -362,6 +371,21 @@ namespace Client_UI_App.Services
                                     kv.Value.VideoSendEp  = new IPEndPoint(addr, rEp.Port);
                                     _videoKey[key]        = username;
                                     break;
+                                }
+                            }
+                            if (username == null)
+                            {
+                                foreach (var kv in _peers)
+                                {
+                                    if (kv.Value.VideoSendEp.Port == rEp.Port)
+                                    {
+                                        username = kv.Key;
+                                        _videoKey.Remove(kv.Value.VideoRecvKey);
+                                        kv.Value.VideoRecvKey = key;
+                                        kv.Value.VideoSendEp  = new IPEndPoint(addr, rEp.Port);
+                                        _videoKey[key]        = username;
+                                        break;
+                                    }
                                 }
                             }
                         }
