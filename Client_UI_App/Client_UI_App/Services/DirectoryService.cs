@@ -127,6 +127,21 @@ namespace Client_UI_App.Services
             return "127.0.0.1";
         }
 
+        // Lấy IP mà máy này dùng để kết nối server (Tailscale IP nếu dùng VPN)
+        // Dùng UDP trick tới LbIp — đảm bảo lấy đúng interface khi có Tailscale
+        public static string GetIpFacingServer()
+        {
+            try
+            {
+                using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0);
+                socket.Connect(LbIp, 65530);
+                string ip = ((System.Net.IPEndPoint)socket.LocalEndPoint!).Address.ToString();
+                if (!ip.StartsWith("127.") && ip != "::1") return ip;
+            }
+            catch { }
+            return GetLocalLanIp();
+        }
+
         // ── Đăng nhập và lấy danh sách user online ──
         // Gửi: LOGIN|username|password|myLanIp:myListeningPort
         // Server đã hỗ trợ sẵn format "IP:Port" qua fullAddressOverride

@@ -641,6 +641,7 @@ namespace Client_UI_App.Forms
                 _pendingVideoJoins.Clear();
 
                 var endpoints = await ResolveOnlineMembersAsync();
+                AppendChat($"[Video] Broadcast JOIN tới {endpoints.Count} endpoint: {string.Join(", ", endpoints.Select(e => e.name))}", Color.FromArgb(100, 100, 140));
                 if (endpoints.Count > 0)
                     await GroupChatService.BroadcastVideoJoinAsync(
                         _groupId, _myUsername,

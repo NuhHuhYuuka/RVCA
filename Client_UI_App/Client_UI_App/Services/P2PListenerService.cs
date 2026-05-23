@@ -131,19 +131,25 @@ namespace Client_UI_App.Services
             }
             else if (line.StartsWith("GROUP_VOICE_JOIN|"))
             {
-                // GROUP_VOICE_JOIN|groupId|username|udpPort|senderTcpPort
-                string[] p = line.Split('|', 5);
-                if (p.Length == 5
+                // GROUP_VOICE_JOIN|groupId|username|udpPort|senderTcpPort|senderIp
+                string[] p = line.Split('|', 6);
+                if (p.Length >= 5
                     && int.TryParse(p[3], out int udpPort)
                     && int.TryParse(p[4], out int tcpPort))
-                    GroupVoiceJoined?.Invoke(p[1], p[2], senderIp, udpPort, tcpPort);
+                {
+                    string ip = ChooseIpForRelay(p.Length >= 6 ? p[5] : null, senderIp);
+                    GroupVoiceJoined?.Invoke(p[1], p[2], ip, udpPort, tcpPort);
+                }
             }
             else if (line.StartsWith("GROUP_VOICE_REPLY|"))
             {
-                // GROUP_VOICE_REPLY|groupId|username|udpPort
-                string[] p = line.Split('|', 4);
-                if (p.Length == 4 && int.TryParse(p[3], out int udpPort))
-                    GroupVoiceReplied?.Invoke(p[1], p[2], senderIp, udpPort);
+                // GROUP_VOICE_REPLY|groupId|username|udpPort|senderIp
+                string[] p = line.Split('|', 5);
+                if (p.Length >= 4 && int.TryParse(p[3], out int udpPort))
+                {
+                    string ip = ChooseIpForRelay(p.Length >= 5 ? p[4] : null, senderIp);
+                    GroupVoiceReplied?.Invoke(p[1], p[2], ip, udpPort);
+                }
             }
             else if (line.StartsWith("GROUP_VOICE_LEAVE|"))
             {
@@ -152,22 +158,28 @@ namespace Client_UI_App.Services
             }
             else if (line.StartsWith("GROUP_VIDEO_JOIN|"))
             {
-                // GROUP_VIDEO_JOIN|groupId|username|audioPort|videoPort|senderTcpPort
-                string[] p = line.Split('|', 6);
-                if (p.Length == 6
+                // GROUP_VIDEO_JOIN|groupId|username|audioPort|videoPort|senderTcpPort|senderIp
+                string[] p = line.Split('|', 7);
+                if (p.Length >= 6
                     && int.TryParse(p[3], out int aPort)
                     && int.TryParse(p[4], out int vPort)
                     && int.TryParse(p[5], out int tcpPort))
-                    GroupVideoJoined?.Invoke(p[1], p[2], senderIp, aPort, vPort, tcpPort);
+                {
+                    string ip = ChooseIpForRelay(p.Length >= 7 ? p[6] : null, senderIp);
+                    GroupVideoJoined?.Invoke(p[1], p[2], ip, aPort, vPort, tcpPort);
+                }
             }
             else if (line.StartsWith("GROUP_VIDEO_REPLY|"))
             {
-                // GROUP_VIDEO_REPLY|groupId|username|audioPort|videoPort
-                string[] p = line.Split('|', 5);
-                if (p.Length == 5
+                // GROUP_VIDEO_REPLY|groupId|username|audioPort|videoPort|senderIp
+                string[] p = line.Split('|', 6);
+                if (p.Length >= 5
                     && int.TryParse(p[3], out int aPort)
                     && int.TryParse(p[4], out int vPort))
-                    GroupVideoReplied?.Invoke(p[1], p[2], senderIp, aPort, vPort);
+                {
+                    string ip = ChooseIpForRelay(p.Length >= 6 ? p[5] : null, senderIp);
+                    GroupVideoReplied?.Invoke(p[1], p[2], ip, aPort, vPort);
+                }
             }
             else if (line.StartsWith("GROUP_VIDEO_LEAVE|"))
             {
@@ -405,19 +417,25 @@ namespace Client_UI_App.Services
                 }
                 else if (firstLine.StartsWith("GROUP_VOICE_JOIN|"))
                 {
-                    // GROUP_VOICE_JOIN|groupId|username|udpPort|senderTcpPort
-                    string[] parts = firstLine.Split('|', 5);
-                    if (parts.Length == 5
+                    // GROUP_VOICE_JOIN|groupId|username|udpPort|senderTcpPort|senderIp
+                    string[] parts = firstLine.Split('|', 6);
+                    if (parts.Length >= 5
                         && int.TryParse(parts[3], out int udpPort)
                         && int.TryParse(parts[4], out int tcpPort))
-                        GroupVoiceJoined?.Invoke(parts[1], parts[2], remoteIp, udpPort, tcpPort);
+                    {
+                        string ip = ChooseIpForRelay(parts.Length >= 6 ? parts[5] : null, remoteIp);
+                        GroupVoiceJoined?.Invoke(parts[1], parts[2], ip, udpPort, tcpPort);
+                    }
                 }
                 else if (firstLine.StartsWith("GROUP_VOICE_REPLY|"))
                 {
-                    // GROUP_VOICE_REPLY|groupId|username|udpPort
-                    string[] parts = firstLine.Split('|', 4);
-                    if (parts.Length == 4 && int.TryParse(parts[3], out int udpPort))
-                        GroupVoiceReplied?.Invoke(parts[1], parts[2], remoteIp, udpPort);
+                    // GROUP_VOICE_REPLY|groupId|username|udpPort|senderIp
+                    string[] parts = firstLine.Split('|', 5);
+                    if (parts.Length >= 4 && int.TryParse(parts[3], out int udpPort))
+                    {
+                        string ip = ChooseIpForRelay(parts.Length >= 5 ? parts[4] : null, remoteIp);
+                        GroupVoiceReplied?.Invoke(parts[1], parts[2], ip, udpPort);
+                    }
                 }
                 else if (firstLine.StartsWith("GROUP_VOICE_LEAVE|"))
                 {
@@ -480,22 +498,28 @@ namespace Client_UI_App.Services
                 }
                 else if (firstLine.StartsWith("GROUP_VIDEO_JOIN|"))
                 {
-                    // GROUP_VIDEO_JOIN|groupId|username|audioPort|videoPort|senderTcpPort
-                    string[] parts = firstLine.Split('|', 6);
-                    if (parts.Length == 6
+                    // GROUP_VIDEO_JOIN|groupId|username|audioPort|videoPort|senderTcpPort|senderIp
+                    string[] parts = firstLine.Split('|', 7);
+                    if (parts.Length >= 6
                         && int.TryParse(parts[3], out int aPort)
                         && int.TryParse(parts[4], out int vPort)
                         && int.TryParse(parts[5], out int tcpPort))
-                        GroupVideoJoined?.Invoke(parts[1], parts[2], remoteIp, aPort, vPort, tcpPort);
+                    {
+                        string ip = ChooseIpForRelay(parts.Length >= 7 ? parts[6] : null, remoteIp);
+                        GroupVideoJoined?.Invoke(parts[1], parts[2], ip, aPort, vPort, tcpPort);
+                    }
                 }
                 else if (firstLine.StartsWith("GROUP_VIDEO_REPLY|"))
                 {
-                    // GROUP_VIDEO_REPLY|groupId|username|audioPort|videoPort
-                    string[] parts = firstLine.Split('|', 5);
-                    if (parts.Length == 5
+                    // GROUP_VIDEO_REPLY|groupId|username|audioPort|videoPort|senderIp
+                    string[] parts = firstLine.Split('|', 6);
+                    if (parts.Length >= 5
                         && int.TryParse(parts[3], out int aPort)
                         && int.TryParse(parts[4], out int vPort))
-                        GroupVideoReplied?.Invoke(parts[1], parts[2], remoteIp, aPort, vPort);
+                    {
+                        string ip = ChooseIpForRelay(parts.Length >= 6 ? parts[5] : null, remoteIp);
+                        GroupVideoReplied?.Invoke(parts[1], parts[2], ip, aPort, vPort);
+                    }
                 }
                 else if (firstLine.StartsWith("GROUP_VIDEO_LEAVE|"))
                 {

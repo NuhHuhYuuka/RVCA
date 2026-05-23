@@ -109,7 +109,8 @@ namespace Client_UI_App.Services
             string groupId, string username, int udpPort, int myTcpPort,
             IEnumerable<(string name, string ip, int port)> memberEndpoints)
         {
-            string line = $"GROUP_VOICE_JOIN|{groupId}|{username}|{udpPort}|{myTcpPort}";
+            string myIp = DirectoryService.GetIpFacingServer();
+            string line = $"GROUP_VOICE_JOIN|{groupId}|{username}|{udpPort}|{myTcpPort}|{myIp}";
             return Task.WhenAll(memberEndpoints.Select(ep =>
                 SendLineAsync(ep.ip, ep.port, line, username, ep.name)));
         }
@@ -119,8 +120,9 @@ namespace Client_UI_App.Services
             string peerIp, int peerTcpPort, string groupId, string username, int myUdpPort,
             string senderName = "", string targetName = "")
         {
+            string myIp = DirectoryService.GetIpFacingServer();
             return SendLineAsync(peerIp, peerTcpPort,
-                $"GROUP_VOICE_REPLY|{groupId}|{username}|{myUdpPort}", senderName, targetName);
+                $"GROUP_VOICE_REPLY|{groupId}|{username}|{myUdpPort}|{myIp}", senderName, targetName);
         }
 
         // Broadcast rời voice channel
@@ -139,7 +141,8 @@ namespace Client_UI_App.Services
             int audioPort, int videoPort, int myTcpPort,
             IEnumerable<(string name, string ip, int port)> memberEndpoints)
         {
-            string line = $"GROUP_VIDEO_JOIN|{groupId}|{username}|{audioPort}|{videoPort}|{myTcpPort}";
+            string myIp = DirectoryService.GetIpFacingServer();
+            string line = $"GROUP_VIDEO_JOIN|{groupId}|{username}|{audioPort}|{videoPort}|{myTcpPort}|{myIp}";
             return Task.WhenAll(memberEndpoints.Select(ep =>
                 SendLineAsync(ep.ip, ep.port, line, username, ep.name)));
         }
@@ -150,8 +153,9 @@ namespace Client_UI_App.Services
             int audioPort, int videoPort,
             string senderName = "", string targetName = "")
         {
+            string myIp = DirectoryService.GetIpFacingServer();
             return SendLineAsync(peerIp, peerTcpPort,
-                $"GROUP_VIDEO_REPLY|{groupId}|{username}|{audioPort}|{videoPort}", senderName, targetName);
+                $"GROUP_VIDEO_REPLY|{groupId}|{username}|{audioPort}|{videoPort}|{myIp}", senderName, targetName);
         }
 
         // Broadcast rời video channel
