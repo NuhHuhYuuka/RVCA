@@ -56,6 +56,7 @@ namespace Client_UI_App.Services
         private ushort         _sendSeq;
 
         public bool IsMuted        { get => _muted; set => _muted = value; }
+        public bool HasAudio       => _waveOut != null && _mixer != null;
         public int  PeerCount      { get { lock (_peersLock) return _peers.Count; } }
 
         public event Action<float>?          MicLevelChanged;
@@ -85,29 +86,50 @@ namespace Client_UI_App.Services
             LocalUdpPort    = ((IPEndPoint)_udp.Client.LocalEndPoint!).Port;
             ExternalUdpPort = LocalUdpPort;
 
-            // Output: mixer → WaveOut — phải khởi tạo TRƯỚC khi trả về để AddPeer an toàn
-            var mixFmt = WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, Channels);
-            _mixer   = new MixingSampleProvider(mixFmt) { ReadFully = true };
-            _waveOut = new WaveOutEvent { DesiredLatency = 150 };
-            _waveOut.Init(_mixer);
-            _waveOut.Play();
+            // Output: mixer → WaveOut — wrap try-catch để không crash khi thiết bị lỗi
+            try
+            {
+                var mixFmt = WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, Channels);
+                _mixer   = new MixingSampleProvider(mixFmt) { ReadFully = true };
+                _waveOut = new WaveOutEvent { DesiredLatency = 150 };
+                _waveOut.Init(_mixer);
+                _waveOut.Play();
+            }
+            catch
+            {
+                try { _waveOut?.Dispose(); } catch { }
+                _waveOut = null;
+                _mixer   = null;
+            }
 
-            // Encoder cho mic
+            // Encoder cho mic — optional
+            try
+            {
 #pragma warning disable CS0618
-            _encoder = new OpusEncoder(SampleRate, Channels, OpusApplication.OPUS_APPLICATION_VOIP)
-            {
-                Bitrate = AudioBitrate
-            };
+                _encoder = new OpusEncoder(SampleRate, Channels, OpusApplication.OPUS_APPLICATION_VOIP)
+                {
+                    Bitrate = AudioBitrate
+                };
 #pragma warning restore CS0618
+            }
+            catch { _encoder = null; }
 
-            // Input: WaveIn mic
-            _waveIn = new WaveInEvent
+            // Input: WaveIn mic — optional
+            try
             {
-                WaveFormat         = new WaveFormat(SampleRate, 16, Channels),
-                BufferMilliseconds = FrameMs
-            };
-            _waveIn.DataAvailable += OnMicData;
-            _waveIn.StartRecording();
+                _waveIn = new WaveInEvent
+                {
+                    WaveFormat         = new WaveFormat(SampleRate, 16, Channels),
+                    BufferMilliseconds = FrameMs
+                };
+                _waveIn.DataAvailable += OnMicData;
+                _waveIn.StartRecording();
+            }
+            catch
+            {
+                try { _waveIn?.Dispose(); } catch { }
+                _waveIn = null;
+            }
 
             _cts = new CancellationTokenSource();
             _ = Task.Run(() => ReceiveLoopAsync(_cts.Token));

@@ -64,6 +64,7 @@ namespace Client_UI_App.Services
         private ushort        _audioSeq;
 
         public bool IsMuted   { get => _muted; set => _muted = value; }
+        public bool HasAudio  => _waveOut != null && _mixer != null;
         public int  PeerCount { get { lock (_lock) return _peers.Count; } }
 
         public event Action<string, Bitmap>?  FrameReceived;      // (peerName, frame)
@@ -85,7 +86,9 @@ namespace Client_UI_App.Services
         }
 
         // ── Start ─────────────────────────────────────────────────────────
-        // _mixer phải khởi tạo TRƯỚC khi trả về để AddPeer an toàn (tránh race condition)
+        // UDP sockets PHẢI thành công (ném nếu hệ thống lỗi nghiêm trọng).
+        // Các thành phần audio (WaveOut/Encoder/WaveIn) được wrap try-catch riêng —
+        // nếu thiết bị audio không hỗ trợ format, video+UDP vẫn hoạt động bình thường.
         public Task StartAsync()
         {
             _audioUdp = new UdpClient(0);
@@ -96,26 +99,50 @@ namespace Client_UI_App.Services
             LocalVideoPort    = ((IPEndPoint)_videoUdp.Client.LocalEndPoint!).Port;
             ExternalVideoPort = LocalVideoPort;
 
-            var mixFmt = WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, Channels);
-            _mixer   = new MixingSampleProvider(mixFmt) { ReadFully = true };
-            _waveOut = new WaveOutEvent { DesiredLatency = 150 };
-            _waveOut.Init(_mixer);
-            _waveOut.Play();
+            // Output audio — optional: thiếu thiết bị hoặc format không hỗ trợ vẫn tiếp tục
+            try
+            {
+                var mixFmt = WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, Channels);
+                _mixer   = new MixingSampleProvider(mixFmt) { ReadFully = true };
+                _waveOut = new WaveOutEvent { DesiredLatency = 150 };
+                _waveOut.Init(_mixer);
+                _waveOut.Play();
+            }
+            catch
+            {
+                try { _waveOut?.Dispose(); } catch { }
+                _waveOut = null;
+                _mixer   = null;
+            }
 
+            // Encoder — optional
+            try
+            {
 #pragma warning disable CS0618
-            _encoder = new OpusEncoder(SampleRate, Channels, OpusApplication.OPUS_APPLICATION_VOIP)
-            {
-                Bitrate = AudioBitrate
-            };
+                _encoder = new OpusEncoder(SampleRate, Channels, OpusApplication.OPUS_APPLICATION_VOIP)
+                {
+                    Bitrate = AudioBitrate
+                };
 #pragma warning restore CS0618
+            }
+            catch { _encoder = null; }
 
-            _waveIn = new WaveInEvent
+            // Input mic — optional
+            try
             {
-                WaveFormat         = new WaveFormat(SampleRate, 16, Channels),
-                BufferMilliseconds = FrameMs
-            };
-            _waveIn.DataAvailable += OnMicData;
-            _waveIn.StartRecording();
+                _waveIn = new WaveInEvent
+                {
+                    WaveFormat         = new WaveFormat(SampleRate, 16, Channels),
+                    BufferMilliseconds = FrameMs
+                };
+                _waveIn.DataAvailable += OnMicData;
+                _waveIn.StartRecording();
+            }
+            catch
+            {
+                try { _waveIn?.Dispose(); } catch { }
+                _waveIn = null;
+            }
 
             _cts = new CancellationTokenSource();
             _ = Task.Run(() => AudioReceiveLoopAsync(_cts.Token));

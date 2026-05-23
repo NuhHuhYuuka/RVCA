@@ -447,6 +447,8 @@ namespace Client_UI_App.Forms
                 UpdateVoiceButton();
                 string myVoiceIp = DirectoryService.GetIpFacingServer();
                 AppendChat($"[Voice] Bạn đã tham gia voice channel (UDP :{myUdp}, IP:{myVoiceIp})", Color.FromArgb(0, 200, 150));
+                if (!_voiceService.HasAudio)
+                    AppendChat("[Voice] ⚠️ Không khởi được thiết bị audio — chỉ nhận (không mic/loa)", Color.OrangeRed);
 
                 ShowVoiceForm();
 
@@ -628,6 +630,8 @@ namespace Client_UI_App.Forms
                 UpdateVideoButton();
                 string myVideoIp = DirectoryService.GetIpFacingServer();
                 AppendChat($"[Video] Bạn đã tham gia video channel (audio:{_videoService.LocalAudioPort} video:{_videoService.LocalVideoPort}, IP:{myVideoIp})", Color.FromArgb(80, 150, 230));
+                if (!_videoService.HasAudio)
+                    AppendChat("[Video] ⚠️ Không khởi được thiết bị audio — chỉ video (không mic/loa)", Color.OrangeRed);
 
                 ShowVideoForm();
 
