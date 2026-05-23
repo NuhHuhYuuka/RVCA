@@ -86,6 +86,10 @@ namespace Client_UI_App.Services
             _ = Task.Run(() => ProcessRelayedLine(senderIp, line));
         }
 
+        // Returns true if the string is a usable LAN/WAN IP (not loopback, not empty)
+        private static bool IsUsableLanIp(string? ip) =>
+            !string.IsNullOrWhiteSpace(ip) && ip != "127.0.0.1" && ip != "::1" && !ip.StartsWith("127.");
+
         private static void ProcessRelayedLine(string senderIp, string line)
         {
             if (line.StartsWith("CHAT|"))
@@ -159,7 +163,7 @@ namespace Client_UI_App.Services
                 string[] p = line.Split('|');
                 if (p.Length >= 4 && int.TryParse(p[3], out int tcp))
                 {
-                    string ip = p.Length >= 5 && !string.IsNullOrWhiteSpace(p[4]) ? p[4] : senderIp;
+                    string ip = p.Length >= 5 && IsUsableLanIp(p[4]) ? p[4] : senderIp;
                     IncomingVoiceCall?.Invoke(p[1], p[2], ip, tcp);
                 }
             }
@@ -169,7 +173,7 @@ namespace Client_UI_App.Services
                 string[] p = line.Split('|');
                 if (p.Length >= 3)
                 {
-                    string ip = p.Length >= 4 && !string.IsNullOrWhiteSpace(p[3]) ? p[3] : senderIp;
+                    string ip = p.Length >= 4 && IsUsableLanIp(p[3]) ? p[3] : senderIp;
                     VoiceCallAnswered?.Invoke(p[1], p[2], ip);
                 }
             }
@@ -189,7 +193,7 @@ namespace Client_UI_App.Services
                 string[] p = line.Split('|');
                 if (p.Length >= 5 && int.TryParse(p[4], out int tcp))
                 {
-                    string ip = p.Length >= 6 && !string.IsNullOrWhiteSpace(p[5]) ? p[5] : senderIp;
+                    string ip = p.Length >= 6 && IsUsableLanIp(p[5]) ? p[5] : senderIp;
                     IncomingVideoCall?.Invoke(p[1], p[2], p[3], ip, tcp);
                 }
             }
@@ -199,7 +203,7 @@ namespace Client_UI_App.Services
                 string[] p = line.Split('|');
                 if (p.Length >= 4)
                 {
-                    string ip = p.Length >= 5 && !string.IsNullOrWhiteSpace(p[4]) ? p[4] : senderIp;
+                    string ip = p.Length >= 5 && IsUsableLanIp(p[4]) ? p[4] : senderIp;
                     VideoCallAnswered?.Invoke(p[1], p[2], p[3], ip);
                 }
             }

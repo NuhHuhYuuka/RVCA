@@ -96,16 +96,35 @@ namespace Client_UI_App.Services
         }
 
         // Lấy IP LAN thực của máy này (không phải loopback)
-        // Dùng "UDP trick": giả kết nối tới 8.8.8.8 để OS chọn interface ra ngoài
+        // Ưu tiên UDP trick; fallback sang NetworkInterface nếu cần
         public static string GetLocalLanIp()
         {
             try
             {
                 using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0);
                 socket.Connect("8.8.8.8", 65530);
-                return ((System.Net.IPEndPoint)socket.LocalEndPoint!).Address.ToString();
+                string ip = ((System.Net.IPEndPoint)socket.LocalEndPoint!).Address.ToString();
+                if (!ip.StartsWith("127.") && ip != "::1") return ip;
             }
-            catch { return "127.0.0.1"; }
+            catch { }
+
+            // Fallback: first non-loopback IPv4 on an active interface
+            try
+            {
+                foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
+                    if (ni.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback) continue;
+                    foreach (var addr in ni.GetIPProperties().UnicastAddresses)
+                    {
+                        if (addr.Address.AddressFamily == AddressFamily.InterNetwork)
+                            return addr.Address.ToString();
+                    }
+                }
+            }
+            catch { }
+
+            return "127.0.0.1";
         }
 
         // ── Đăng nhập và lấy danh sách user online ──
