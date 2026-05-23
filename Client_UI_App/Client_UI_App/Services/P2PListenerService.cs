@@ -22,6 +22,7 @@ namespace Client_UI_App.Services
         private static TcpListener?             _listener;
         private static CancellationTokenSource? _cts;
         private static string                   _myUsername = "";
+        private static string                   _myLanIp    = "127.0.0.1";
 
         public static int ListeningPort { get; private set; }
 
@@ -89,6 +90,27 @@ namespace Client_UI_App.Services
         // Returns true if the string is a usable LAN/WAN IP (not loopback, not empty)
         private static bool IsUsableLanIp(string? ip) =>
             !string.IsNullOrWhiteSpace(ip) && ip != "127.0.0.1" && ip != "::1" && !ip.StartsWith("127.");
+
+        // Chọn IP tốt nhất để gửi UDP đến peer qua relay.
+        // - Nếu embeddedIp cùng /24 subnet với máy mình → dùng nó (cùng LAN, direct).
+        // - Nếu khác subnet → dùng senderIp (Tailscale/VPN IP từ relay server, routable).
+        // Điều này xử lý cả 2 trường hợp: cùng LAN + server WAN, khác mạng + Tailscale.
+        private static string ChooseIpForRelay(string? embeddedIp, string senderIp)
+        {
+            if (!IsUsableLanIp(embeddedIp))
+                return IsUsableLanIp(senderIp) ? senderIp : "127.0.0.1";
+
+            if (IsUsableLanIp(_myLanIp))
+            {
+                string[] my  = _myLanIp.Split('.');
+                string[] emb = embeddedIp!.Split('.');
+                bool sameSubnet = my.Length == 4 && emb.Length == 4
+                    && my[0] == emb[0] && my[1] == emb[1] && my[2] == emb[2];
+                if (sameSubnet) return embeddedIp!;
+            }
+
+            return IsUsableLanIp(senderIp) ? senderIp : embeddedIp!;
+        }
 
         private static void ProcessRelayedLine(string senderIp, string line)
         {
@@ -163,7 +185,7 @@ namespace Client_UI_App.Services
                 string[] p = line.Split('|');
                 if (p.Length >= 4 && int.TryParse(p[3], out int tcp))
                 {
-                    string ip = p.Length >= 5 && IsUsableLanIp(p[4]) ? p[4] : senderIp;
+                    string ip = ChooseIpForRelay(p.Length >= 5 ? p[4] : null, senderIp);
                     IncomingVoiceCall?.Invoke(p[1], p[2], ip, tcp);
                 }
             }
@@ -173,7 +195,7 @@ namespace Client_UI_App.Services
                 string[] p = line.Split('|');
                 if (p.Length >= 3)
                 {
-                    string ip = p.Length >= 4 && IsUsableLanIp(p[3]) ? p[3] : senderIp;
+                    string ip = ChooseIpForRelay(p.Length >= 4 ? p[3] : null, senderIp);
                     VoiceCallAnswered?.Invoke(p[1], p[2], ip);
                 }
             }
@@ -193,7 +215,7 @@ namespace Client_UI_App.Services
                 string[] p = line.Split('|');
                 if (p.Length >= 5 && int.TryParse(p[4], out int tcp))
                 {
-                    string ip = p.Length >= 6 && IsUsableLanIp(p[5]) ? p[5] : senderIp;
+                    string ip = ChooseIpForRelay(p.Length >= 6 ? p[5] : null, senderIp);
                     IncomingVideoCall?.Invoke(p[1], p[2], p[3], ip, tcp);
                 }
             }
@@ -203,7 +225,7 @@ namespace Client_UI_App.Services
                 string[] p = line.Split('|');
                 if (p.Length >= 4)
                 {
-                    string ip = p.Length >= 5 && IsUsableLanIp(p[4]) ? p[4] : senderIp;
+                    string ip = ChooseIpForRelay(p.Length >= 5 ? p[4] : null, senderIp);
                     VideoCallAnswered?.Invoke(p[1], p[2], p[3], ip);
                 }
             }
@@ -282,6 +304,7 @@ namespace Client_UI_App.Services
         public static int Start(string username)
         {
             _myUsername = username;
+            _myLanIp    = DirectoryService.GetLocalLanIp();
             _cts        = new CancellationTokenSource();
             _listener   = new TcpListener(IPAddress.Any, 0);
             _listener.Start();
