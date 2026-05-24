@@ -320,9 +320,11 @@ static async Task HandleBotVoiceOfferRelayAsync(string srvIp, string fromUser, s
     if (parts.Length < 3) return;
     string clientName  = parts[1];
     if (!int.TryParse(parts[2], out int clientUdpPort)) return;
-    // Prefer embedded LAN IP (same-LAN scenario); fall back to relay senderIp
-    string clientIp = parts.Length >= 4 && !string.IsNullOrWhiteSpace(parts[3])
-        ? parts[3] : senderIp;
+    // Chọn IP đúng: nếu embedded LAN IP cùng subnet với bot thì dùng (same-LAN),
+    // còn không thì dùng senderIp (Tailscale/WAN routable). Tránh case bot gửi UDP
+    // tới IP LAN của client không reach được khi 2 máy khác mạng.
+    string embeddedIp = parts.Length >= 4 ? parts[3] : "";
+    string clientIp   = ChooseIpForRelay(embeddedIp, senderIp);
 
     Console.ForegroundColor = ConsoleColor.Green;
     Console.WriteLine($"[VOICE RELAY] {clientName} bắt đầu voice call qua relay (UDP:{clientUdpPort} IP:{clientIp})");
@@ -1468,6 +1470,47 @@ static async Task<string> DetectBotIpAsync()
         catch { /* server unreachable — fall through */ }
     }
 
+    // Lớp 0.5: Scan adapter Tailscale (CGNAT 100.64.0.0/10) —
+    // cứu cho trường hợp SERVER_IP chưa set nhưng máy có Tailscale active.
+    // Peer khác nối qua Tailscale cần IP này để UDP audio reach được bot.
+    try
+    {
+        string? cgnatIp = null;
+        foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
+            bool named = ni.Name.IndexOf("Tailscale", StringComparison.OrdinalIgnoreCase) >= 0
+                      || ni.Description.IndexOf("Tailscale", StringComparison.OrdinalIgnoreCase) >= 0;
+            foreach (var ua in ni.GetIPProperties().UnicastAddresses)
+            {
+                if (ua.Address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) continue;
+                string addr = ua.Address.ToString();
+                if (addr.StartsWith("127.")) continue;
+                if (named)
+                {
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine($"[IP] Tailscale adapter ({ni.Name}): {addr}");
+                    Console.ResetColor();
+                    return addr;
+                }
+                if (cgnatIp == null && addr.StartsWith("100."))
+                {
+                    string[] p = addr.Split('.');
+                    if (p.Length == 4 && int.TryParse(p[1], out int b) && b >= 64 && b <= 127)
+                        cgnatIp = addr;
+                }
+            }
+        }
+        if (cgnatIp != null)
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"[IP] Tailscale CGNAT: {cgnatIp}");
+            Console.ResetColor();
+            return cgnatIp;
+        }
+    }
+    catch { }
+
     // Lớp 1: Azure IMDS (chỉ hoạt động trên Azure VM, timeout 1s)
     try
     {
@@ -1513,10 +1556,35 @@ static async Task<string> DetectBotIpAsync()
     return lanIp;
 }
 
+// Chọn IP của peer dùng cho UDP audio:
+// - Nếu embeddedIp (LAN IP của peer) cùng /24 subnet với bot → dùng nó (same LAN).
+// - Ngược lại → dùng senderIp (Tailscale/WAN IP từ relay server, routable).
+// Tránh case bot gửi UDP tới LAN IP của peer ở mạng khác (không reach được).
+static string ChooseIpForRelay(string? embeddedIp, string senderIp)
+{
+    bool IsUsable(string? ip) =>
+        !string.IsNullOrWhiteSpace(ip) && !ip.StartsWith("127.") && ip != "::1";
+
+    if (!IsUsable(embeddedIp))
+        return IsUsable(senderIp) ? senderIp : "127.0.0.1";
+
+    string botLanIp = GetLocalLanIp();
+    if (IsUsable(botLanIp))
+    {
+        string[] my  = botLanIp.Split('.');
+        string[] emb = embeddedIp!.Split('.');
+        bool sameSubnet = my.Length == 4 && emb.Length == 4
+            && my[0] == emb[0] && my[1] == emb[1] && my[2] == emb[2];
+        if (sameSubnet) return embeddedIp!;
+    }
+    return IsUsable(senderIp) ? senderIp : embeddedIp!;
+}
+
 // Lấy IP của adapter dùng để reach server (Tailscale nếu server trên Tailscale).
 // Dùng cho VOICE_ACCEPT để client peer biết gửi UDP về đâu.
 static string GetIpFacingServer(string srvIp)
 {
+    // Lớp 0: UDP-trick tới server
     if (!string.IsNullOrWhiteSpace(srvIp) && srvIp != "127.0.0.1")
     {
         try
@@ -1530,6 +1598,35 @@ static string GetIpFacingServer(string srvIp)
         }
         catch { }
     }
+
+    // Lớp 0.5: Tailscale adapter scan — cho trường hợp SERVER_IP=127.0.0.1
+    // nhưng máy có Tailscale active (server local + bot local + client qua Tailscale).
+    try
+    {
+        string? cgnatIp = null;
+        foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
+            bool named = ni.Name.IndexOf("Tailscale", StringComparison.OrdinalIgnoreCase) >= 0
+                      || ni.Description.IndexOf("Tailscale", StringComparison.OrdinalIgnoreCase) >= 0;
+            foreach (var ua in ni.GetIPProperties().UnicastAddresses)
+            {
+                if (ua.Address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) continue;
+                string addr = ua.Address.ToString();
+                if (addr.StartsWith("127.")) continue;
+                if (named) return addr;
+                if (cgnatIp == null && addr.StartsWith("100."))
+                {
+                    string[] p = addr.Split('.');
+                    if (p.Length == 4 && int.TryParse(p[1], out int b) && b >= 64 && b <= 127)
+                        cgnatIp = addr;
+                }
+            }
+        }
+        if (cgnatIp != null) return cgnatIp;
+    }
+    catch { }
+
     return GetLocalLanIp();
 }
 
