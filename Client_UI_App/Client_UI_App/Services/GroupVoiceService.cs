@@ -173,8 +173,9 @@ namespace Client_UI_App.Services
                 var decoder = new OpusDecoder(SampleRate, Channels);
 #pragma warning restore CS0618
 
-                // WaveToSampleProvider chuyển 16-bit PCM → IEEE float ISampleProvider
-                var sp = new WaveToSampleProvider(buffer);
+                // Pcm16BitToSampleProvider chuyển 16-bit PCM → IEEE float ISampleProvider
+                // (WaveToSampleProvider chỉ nhận float input, sẽ throw "Must be already floating point")
+                var sp = new Pcm16BitToSampleProvider(buffer);
                 _mixer?.AddMixerInput(sp);
 
                 _peers[key] = new PeerState
