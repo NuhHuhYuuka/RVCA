@@ -34,9 +34,11 @@ namespace Client_UI_App.Services
         private const int MaxOpusBytes = 1275;
         private const int AudioBitrate = 24000;
 
-        // UDP transport
-        private UdpClient?            _udpRecv;
-        private UdpClient?            _udpSend;
+        // UDP transport — DÙNG 1 SOCKET cho cả send + recv
+        // Lý do: nếu dùng 2 socket khác nhau, source port của gói gửi đi != port nhận.
+        // Khi peer (bot) NAT-remap về source port, response sẽ tới ephemeral _udpSend
+        // mà _udpRecv không listen → mất audio. Single-socket tránh hoàn toàn case này.
+        private UdpClient?            _udp;
         private IPEndPoint?           _remoteEp;
         private CancellationTokenSource? _recvCts;
 
@@ -55,6 +57,14 @@ namespace Client_UI_App.Services
         private volatile bool   _muted        = false;
         private bool   _disposed     = false;
         private ushort _sendSeq      = 0;
+
+        // Half-duplex echo suppression — khi đang nhận audio từ peer (bot đang nói),
+        // tự động suppress mic để loa không bị mic capture lại → tránh feedback loop.
+        // Cập nhật mỗi lần nhận packet; OnMicData check timestamp này.
+        private long          _lastIncomingTickMs;
+        private const int     EchoSuppressMs = 600;  // mic re-enabled ~600ms sau khi bot ngừng nói
+        // Bật/tắt tính năng half-duplex (1:1 P2P giữa user có thể không cần — chỉ bot)
+        public bool EchoSuppression { get; set; } = false;
 
         public bool IsMuted
         {
@@ -86,8 +96,8 @@ namespace Client_UI_App.Services
         // ─────────────────────────────────────────────────────────────
         public int PrepareUdp()
         {
-            _udpRecv     = new UdpClient(0);         // OS chọn port ngẫu nhiên
-            LocalUdpPort = ((IPEndPoint)_udpRecv.Client.LocalEndPoint!).Port;
+            _udp         = new UdpClient(0);         // OS chọn port ngẫu nhiên — dùng cho cả send+recv
+            LocalUdpPort = ((IPEndPoint)_udp.Client.LocalEndPoint!).Port;
             return LocalUdpPort;
         }
 
@@ -97,7 +107,6 @@ namespace Client_UI_App.Services
         public void SetRemoteEndpoint(string ip, int port)
         {
             _remoteEp = new IPEndPoint(IPAddress.Parse(ip), port);
-            _udpSend  = new UdpClient();
         }
 
         // ─────────────────────────────────────────────────────────────
@@ -154,10 +163,8 @@ namespace Client_UI_App.Services
             _waveOut    = null;
             _playBuffer = null;
 
-            try { _udpSend?.Close(); } catch { }
-            try { _udpRecv?.Close(); } catch { }
-            _udpSend = null;
-            _udpRecv = null;
+            try { _udp?.Close(); } catch { }
+            _udp = null;
 
             _audioStarted = false;
         }
@@ -171,7 +178,7 @@ namespace Client_UI_App.Services
         // Mic → Opus encode → UDP send
         private void OnMicData(object? sender, WaveInEventArgs e)
         {
-            if (_encoder is null || _udpSend is null || _remoteEp is null || _disposed) return;
+            if (_encoder is null || _udp is null || _remoteEp is null || _disposed) return;
 
             int    samples = e.BytesRecorded / 2;
             short[] pcm    = new short[samples];
@@ -181,6 +188,18 @@ namespace Client_UI_App.Services
             {
                 MicLevelChanged?.Invoke(0f);
                 return;
+            }
+
+            // Echo suppression — nếu bot vừa gửi audio gần đây thì mic của user có thể
+            // đang capture loa (echo). Discard mic frame để không loop ngược lại bot.
+            if (EchoSuppression)
+            {
+                long nowMs = DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond;
+                if (nowMs - _lastIncomingTickMs < EchoSuppressMs)
+                {
+                    MicLevelChanged?.Invoke(0f);
+                    return;
+                }
             }
 
             MicLevelChanged?.Invoke(ComputeRms(pcm, samples));
@@ -204,7 +223,7 @@ namespace Client_UI_App.Services
             unchecked { _sendSeq++; }
             Buffer.BlockCopy(opusBuf, 0, packet, 2, opusLen);
 
-            try { _udpSend.Send(packet, packet.Length, _remoteEp); }
+            try { _udp.Send(packet, packet.Length, _remoteEp); }
             catch { }
         }
 
@@ -216,8 +235,11 @@ namespace Client_UI_App.Services
             {
                 try
                 {
-                    var result = await _udpRecv!.ReceiveAsync(ct);
+                    var result = await _udp!.ReceiveAsync(ct);
                     byte[] data = result.Buffer;
+
+                    // Mark "peer đang nói" — half-duplex sẽ suppress mic trong EchoSuppressMs
+                    _lastIncomingTickMs = DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond;
 
                     _recvPacketCount++;
                     if (_recvPacketCount == 1 || _recvPacketCount % 100 == 0)

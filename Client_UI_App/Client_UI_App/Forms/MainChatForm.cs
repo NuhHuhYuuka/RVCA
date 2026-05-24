@@ -994,6 +994,9 @@ namespace Client_UI_App.Forms
             SetStatus("Đang kết nối voice call với UitiChan...", Color.DodgerBlue);
 
             _activecall = new VoiceCallService();
+            // Bật half-duplex echo suppression cho bot call: khi bot đang phát voice
+            // (loa của user), mic sẽ tự suppress để không capture lại → tránh feedback loop.
+            _activecall.EchoSuppression = true;
             _callPeer   = "UitiChan";
             int localUdpPort = _activecall.PrepareUdp();
 
