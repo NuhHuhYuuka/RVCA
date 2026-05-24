@@ -56,7 +56,22 @@ namespace Client_UI_App.Services
         private bool   _disposed     = false;
         private ushort _sendSeq      = 0;
 
-        public bool IsMuted          { get => _muted; set => _muted = value; }
+        public bool IsMuted
+        {
+            get => _muted;
+            set
+            {
+                _muted = value;
+                // Thực sự stop/start mic capture — đảm bảo không còn audio nào lọt qua
+                // (chỉ flag dễ bị race với buffer NAudio đã queue trước khi flag set)
+                try
+                {
+                    if (value) _waveIn?.StopRecording();
+                    else       _waveIn?.StartRecording();
+                }
+                catch { }
+            }
+        }
         public int  LocalUdpPort     { get; private set; }
 
         // Fired khi audio bắt đầu chạy (cả 2 bên đã sẵn sàng)
@@ -194,6 +209,7 @@ namespace Client_UI_App.Services
         }
 
         // UDP receive → Opus decode → playback
+        private int _recvPacketCount = 0;
         private async Task ReceiveLoopAsync(CancellationToken ct)
         {
             while (!ct.IsCancellationRequested)
@@ -202,6 +218,11 @@ namespace Client_UI_App.Services
                 {
                     var result = await _udpRecv!.ReceiveAsync(ct);
                     byte[] data = result.Buffer;
+
+                    _recvPacketCount++;
+                    if (_recvPacketCount == 1 || _recvPacketCount % 100 == 0)
+                        System.Diagnostics.Debug.WriteLine(
+                            $"[VoiceCall] Received UDP packet #{_recvPacketCount} from {result.RemoteEndPoint}, size={data.Length}");
 
                     // Packet quá ngắn (chỉ có header hoặc trống)
                     if (data.Length <= 2) continue;
