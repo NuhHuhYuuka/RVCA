@@ -20,6 +20,7 @@ namespace Client_UI_App.Forms
             lblMic     = new System.Windows.Forms.Label();
             btnMute    = new System.Windows.Forms.Button();
             btnCam     = new System.Windows.Forms.Button();
+            btnScreen  = new System.Windows.Forms.Button();
             btnLeave   = new System.Windows.Forms.Button();
 
             pnlCtrl.SuspendLayout();
@@ -82,8 +83,19 @@ namespace Client_UI_App.Forms
             btnCam.Cursor    = System.Windows.Forms.Cursors.Hand;
             btnCam.Click    += btnCam_Click;
 
+            btnScreen.Text      = "🖥️ Chia sẻ MH";
+            btnScreen.Location  = new Point(466, 12);
+            btnScreen.Size      = new Size(130, 30);
+            btnScreen.Font      = new Font("Segoe UI", 10F);
+            btnScreen.BackColor = Color.FromArgb(50, 50, 72);
+            btnScreen.ForeColor = clrText;
+            btnScreen.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            btnScreen.FlatAppearance.BorderSize = 0;
+            btnScreen.Cursor    = System.Windows.Forms.Cursors.Hand;
+            btnScreen.Click    += btnScreen_Click;
+
             btnLeave.Text      = "📵 Rời Video";
-            btnLeave.Location  = new Point(466, 12);
+            btnLeave.Location  = new Point(604, 12);
             btnLeave.Size      = new Size(130, 30);
             btnLeave.Font      = new Font("Segoe UI", 10F, FontStyle.Bold);
             btnLeave.BackColor = clrRed;
@@ -95,7 +107,7 @@ namespace Client_UI_App.Forms
 
             pnlCtrl.Controls.AddRange(new System.Windows.Forms.Control[]
             {
-                lblMic, pbMic, btnMute, btnCam, btnLeave
+                lblMic, pbMic, btnMute, btnCam, btnScreen, btnLeave
             });
 
             // ── Form ──────────────────────────────────────────────────────
@@ -122,6 +134,7 @@ namespace Client_UI_App.Forms
         private System.Windows.Forms.Label           lblMic;
         private System.Windows.Forms.Button          btnMute;
         private System.Windows.Forms.Button          btnCam;
+        private System.Windows.Forms.Button          btnScreen;
         private System.Windows.Forms.Button          btnLeave;
     }
 }

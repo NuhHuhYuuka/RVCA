@@ -24,6 +24,10 @@ namespace Client_UI_App.Forms
         private bool _cameraOn = true;
         private volatile bool _selfFramePending;
 
+        // Screen sharing — khi bật, thay frame webcam bằng frame màn hình
+        private ScreenCaptureService? _screenCapture;
+        private bool _isScreenSharing;
+
         public event Action? LeaveRequested;
 
         public GroupVideoForm(string myUsername, GroupVideoService svc, VideoCaptureService? capture)
@@ -102,7 +106,8 @@ namespace Client_UI_App.Forms
 
         private void OnLocalFrame(Bitmap bmp)
         {
-            if (IsDisposed || !_cameraOn) { bmp.Dispose(); return; }
+            // Khi share màn hình thì bỏ qua frame webcam (screen frames thay thế)
+            if (IsDisposed || !_cameraOn || _isScreenSharing) { bmp.Dispose(); return; }
 
             // Gửi tới các peer qua UDP
             _svc.SendVideoFrame(bmp);
@@ -218,6 +223,80 @@ namespace Client_UI_App.Forms
             }
         }
 
+        // ── Screen share ─────────────────────────────────────────────────
+        private void btnScreen_Click(object? sender, EventArgs e)
+        {
+            if (!_isScreenSharing) StartScreenShare();
+            else                   StopScreenShare();
+        }
+
+        private void StartScreenShare()
+        {
+            _isScreenSharing      = true;
+            _svc.TargetFrameSize  = ScreenCaptureService.FrameSize;
+
+            _screenCapture = new ScreenCaptureService();
+            _screenCapture.FrameCaptured += OnScreenFrame;
+            _screenCapture.Start();
+
+            btnScreen.Text      = "🖥️ Dừng chia sẻ";
+            btnScreen.BackColor = Color.FromArgb(180, 80, 50);
+
+            // Xóa preview cũ — sẽ thay bằng frame màn hình
+            if (_tiles.TryGetValue(_myUsername, out var pic))
+            {
+                var old = pic.Image;
+                pic.Image = null;
+                old?.Dispose();
+            }
+        }
+
+        private void StopScreenShare()
+        {
+            _isScreenSharing     = false;
+            _svc.TargetFrameSize = new Size(320, 240);
+
+            if (_screenCapture != null)
+            {
+                _screenCapture.FrameCaptured -= OnScreenFrame;
+                _screenCapture.Stop();
+                _screenCapture.Dispose();
+                _screenCapture = null;
+            }
+
+            btnScreen.Text      = "🖥️ Chia sẻ MH";
+            btnScreen.BackColor = Color.FromArgb(50, 50, 72);
+        }
+
+        // Frame từ màn hình → gửi tới tất cả peer + hiển thị local preview
+        private void OnScreenFrame(Bitmap bmp)
+        {
+            if (IsDisposed) { bmp.Dispose(); return; }
+
+            _svc.SendVideoFrame(bmp);
+
+            var now = DateTime.UtcNow;
+            bool show = (now - _lastLocalFrame).TotalMilliseconds >= LocalIntervalMs
+                        && !_selfFramePending;
+            if (show)
+            {
+                _lastLocalFrame   = now;
+                _selfFramePending = true;
+                var clone = (Bitmap)bmp.Clone();
+                BeginInvoke(() =>
+                {
+                    _selfFramePending = false;
+                    if (IsDisposed) { clone.Dispose(); return; }
+                    if (!_tiles.TryGetValue(_myUsername, out var pic)) { clone.Dispose(); return; }
+                    var old = pic.Image;
+                    pic.Image = clone;
+                    old?.Dispose();
+                });
+            }
+
+            bmp.Dispose();
+        }
+
         private void btnLeave_Click(object? sender, EventArgs e)
         {
             LeaveRequested?.Invoke();
@@ -232,6 +311,14 @@ namespace Client_UI_App.Forms
 
             if (_capture != null)
                 _capture.FrameCaptured -= OnLocalFrame;
+
+            if (_screenCapture != null)
+            {
+                _screenCapture.FrameCaptured -= OnScreenFrame;
+                _screenCapture.Stop();
+                _screenCapture.Dispose();
+                _screenCapture = null;
+            }
 
             // Dispose tất cả ảnh còn treo
             foreach (var pic in _tiles.Values)

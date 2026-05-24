@@ -43,6 +43,9 @@ namespace Client_UI_App.Services
         public int ExternalAudioPort { get; private set; }
         public int ExternalVideoPort { get; private set; }
 
+        // Kích thước frame gửi đi — đổi sang ScreenCaptureService.FrameSize khi share màn hình
+        public Size TargetFrameSize { get; set; } = new Size(320, 240);
+
         // Peers (key = username)
         private readonly Dictionary<string, PeerState> _peers    = new();
         private readonly Dictionary<string, string>    _audioKey = new(); // "ip:port" → username
@@ -226,10 +229,10 @@ namespace Client_UI_App.Services
             if (_videoUdp == null || _disposed) return;
             try
             {
-                // Scale xuống 320×240 nếu lớn hơn
-                Bitmap src = bmp.Width == 320 && bmp.Height == 240
+                // Scale theo TargetFrameSize (320x240 mặc định, 640x480 khi share màn hình)
+                Bitmap src = bmp.Size == TargetFrameSize
                     ? bmp
-                    : new Bitmap(bmp, new Size(320, 240));
+                    : new Bitmap(bmp, TargetFrameSize);
 
                 using var ms  = new MemoryStream(16384);
                 using var ep2 = new EncoderParameters(1);
