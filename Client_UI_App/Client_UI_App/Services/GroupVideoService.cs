@@ -234,14 +234,19 @@ namespace Client_UI_App.Services
                     ? bmp
                     : new Bitmap(bmp, TargetFrameSize);
 
+                // Quality cao khi share screen (text sắc nét), thấp khi webcam (tiết kiệm bandwidth).
+                // Threshold 320x240: bigger = screen share scenario.
+                long quality  = TargetFrameSize.Width > 320 ? 60L : 40L;
                 using var ms  = new MemoryStream(16384);
                 using var ep2 = new EncoderParameters(1);
-                ep2.Param[0]  = new EncoderParameter(Encoder.Quality, 40L);
+                ep2.Param[0]  = new EncoderParameter(Encoder.Quality, quality);
                 src.Save(ms, JpegCodec, ep2);
                 if (!ReferenceEquals(src, bmp)) src.Dispose();
 
                 byte[] jpg = ms.ToArray();
-                if (jpg.Length > 60000) return;
+                // UDP datagram max ~65507 bytes; 63000 + 5-byte header = an toàn.
+                // Frame screen share q60 thường 30-50KB, đôi khi vượt → drop frame đó.
+                if (jpg.Length > 63000) return;
 
                 byte[] pkt = new byte[5 + jpg.Length];
                 pkt[0] = 0x56;

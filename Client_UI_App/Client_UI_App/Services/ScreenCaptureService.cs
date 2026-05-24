@@ -14,8 +14,9 @@ namespace Client_UI_App.Services
         private CancellationTokenSource? _cts;
         private bool _disposed;
 
-        // Output 640×480: đọc được text màn hình, vẫn fit trong 90KB UDP packet
-        public static readonly Size FrameSize = new(640, 480);
+        // Output 960×720: đọc rõ text màn hình hơn, vẫn fit trong UDP packet (~65KB max).
+        // Quality 60 ở GroupVideoService giúp text sắc nét hơn so với q40 cũ.
+        public static readonly Size FrameSize = new(960, 720);
 
         public event Action<Bitmap>? FrameCaptured;
 

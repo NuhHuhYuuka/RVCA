@@ -33,8 +33,9 @@ namespace Client_UI_App.Forms
         public event Action<bool>? PresentRequested;
 
         // Kích thước tile bình thường (webcam) vs khi presenter (share screen)
+        // BigW/H = ScreenCaptureService.FrameSize → tile render 1:1 không bị downscale.
         private const int NormalW = 320, NormalH = 240;
-        private const int BigW    = 800, BigH    = 600;
+        private const int BigW    = 960, BigH    = 720;
         private const int LH       = 22;
 
         public GroupVideoForm(string myUsername, GroupVideoService svc, VideoCaptureService? capture)
