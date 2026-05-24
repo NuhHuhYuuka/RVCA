@@ -67,6 +67,7 @@ namespace Client_UI_App.Forms
             P2PListenerService.GroupVideoJoined     += OnGroupVideoJoined;
             P2PListenerService.GroupVideoReplied    += OnGroupVideoReplied;
             P2PListenerService.GroupVideoLeft       += OnGroupVideoLeft;
+            P2PListenerService.GroupVideoPresent    += OnGroupVideoPresent;
 
             _ = RefreshMembersAsync();
         }
@@ -82,6 +83,7 @@ namespace Client_UI_App.Forms
             P2PListenerService.GroupVideoJoined     -= OnGroupVideoJoined;
             P2PListenerService.GroupVideoReplied    -= OnGroupVideoReplied;
             P2PListenerService.GroupVideoLeft       -= OnGroupVideoLeft;
+            P2PListenerService.GroupVideoPresent    -= OnGroupVideoPresent;
 
             _voiceForm?.Close();
             _voiceForm = null;
@@ -823,8 +825,15 @@ namespace Client_UI_App.Forms
             if (_videoForm != null && !_videoForm.IsDisposed) { _videoForm.BringToFront(); return; }
 
             _videoForm = new GroupVideoForm(_myUsername, _videoService!, _videoCapture);
-            _videoForm.LeaveRequested += async () => await LeaveVideoAsync();
-            _videoForm.FormClosed     += (_, _) => { _videoForm = null; };
+            _videoForm.LeaveRequested    += async () => await LeaveVideoAsync();
+            _videoForm.PresentRequested  += async (isPresenting) =>
+            {
+                var endpoints = await ResolveOnlineMembersAsync();
+                if (endpoints.Count > 0)
+                    await GroupChatService.BroadcastVideoPresentAsync(
+                        _groupId, _myUsername, isPresenting, endpoints);
+            };
+            _videoForm.FormClosed        += (_, _) => { _videoForm = null; };
 
             // Thêm tile cho các peer đang trong channel
             foreach (string m in _videoMembers)
@@ -885,6 +894,19 @@ namespace Client_UI_App.Forms
                 _videoService.AddPeer(peerName, peerIp, peerAudio, peerVideo);
             else
                 _pendingVideoReplies[peerName] = (peerIp, peerAudio, peerVideo);
+        }
+
+        // Peer toggle share screen → resize tile của họ ở UI mình
+        private void OnGroupVideoPresent(string groupId, string peerName, bool isPresenting)
+        {
+            if (groupId != _groupId || peerName == _myUsername) return;
+            if (InvokeRequired) { Invoke(() => OnGroupVideoPresent(groupId, peerName, isPresenting)); return; }
+
+            _videoForm?.SetPresenter(peerName, isPresenting);
+            AppendChat(isPresenting
+                ? $"[Video] 🖥️ {peerName} đang chia sẻ màn hình"
+                : $"[Video] {peerName} đã dừng chia sẻ màn hình",
+                Color.FromArgb(180, 120, 200));
         }
 
         // Peer rời video channel

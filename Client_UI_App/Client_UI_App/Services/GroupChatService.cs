@@ -158,6 +158,16 @@ namespace Client_UI_App.Services
                 $"GROUP_VIDEO_REPLY|{groupId}|{username}|{audioPort}|{videoPort}|{myIp}", senderName, targetName);
         }
 
+        // Broadcast trạng thái share màn hình: peer phóng to tile khi nhận
+        public static Task BroadcastVideoPresentAsync(
+            string groupId, string username, bool isPresenting,
+            IEnumerable<(string name, string ip, int port)> memberEndpoints)
+        {
+            string line = $"GROUP_VIDEO_PRESENT|{groupId}|{username}|{(isPresenting ? 1 : 0)}";
+            return Task.WhenAll(memberEndpoints.Select(ep =>
+                SendLineAsync(ep.ip, ep.port, line, username, ep.name)));
+        }
+
         // Broadcast rời video channel
         public static Task BroadcastVideoLeaveAsync(
             string groupId, string username,

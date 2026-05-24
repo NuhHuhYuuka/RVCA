@@ -29,6 +29,13 @@ namespace Client_UI_App.Forms
         private bool _isScreenSharing;
 
         public event Action? LeaveRequested;
+        // Fired khi user toggle share screen — GroupChatForm broadcast tới peer
+        public event Action<bool>? PresentRequested;
+
+        // Kích thước tile bình thường (webcam) vs khi presenter (share screen)
+        private const int NormalW = 320, NormalH = 240;
+        private const int BigW    = 800, BigH    = 600;
+        private const int LH       = 22;
 
         public GroupVideoForm(string myUsername, GroupVideoService svc, VideoCaptureService? capture)
         {
@@ -161,10 +168,31 @@ namespace Client_UI_App.Forms
             catch { }
         }
 
+        // ── Resize tile khi peer share/dừng screen — gọi từ GroupChatForm ─
+        public void SetPresenter(string name, bool isPresenting)
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired) { Invoke(() => SetPresenter(name, isPresenting)); return; }
+            if (!_tiles.TryGetValue(name, out var pic)) return;
+
+            int W = isPresenting ? BigW : NormalW;
+            int H = isPresenting ? BigH : NormalH;
+            var tile = pic.Parent;
+            if (tile == null) return;
+
+            tile.Size = new Size(W, H + LH);
+            pic.Size  = new Size(W, H);
+            if (_tileLabels.TryGetValue(name, out var lbl))
+            {
+                lbl.Size     = new Size(W, LH);
+                lbl.Location = new Point(0, H);
+            }
+        }
+
         // ── Tạo 1 tile (panel + picturebox + label) ───────────────────────
         private void AddTile(string name, bool isSelf)
         {
-            const int W = 320, H = 240, LH = 22;
+            int W = NormalW, H = NormalH;
 
             var tile = new Panel
             {
@@ -242,13 +270,17 @@ namespace Client_UI_App.Forms
             btnScreen.Text      = "🖥️ Dừng chia sẻ";
             btnScreen.BackColor = Color.FromArgb(180, 80, 50);
 
-            // Xóa preview cũ — sẽ thay bằng frame màn hình
+            // Phóng to tile của mình và clear preview cũ
+            SetPresenter(_myUsername, true);
             if (_tiles.TryGetValue(_myUsername, out var pic))
             {
                 var old = pic.Image;
                 pic.Image = null;
                 old?.Dispose();
             }
+
+            // Báo peer: mình bắt đầu share → họ phóng to tile của mình ở UI họ
+            PresentRequested?.Invoke(true);
         }
 
         private void StopScreenShare()
@@ -266,6 +298,10 @@ namespace Client_UI_App.Forms
 
             btnScreen.Text      = "🖥️ Chia sẻ MH";
             btnScreen.BackColor = Color.FromArgb(50, 50, 72);
+
+            // Trở lại tile bình thường + báo peer
+            SetPresenter(_myUsername, false);
+            PresentRequested?.Invoke(false);
         }
 
         // Frame từ màn hình → gửi tới tất cả peer + hiển thị local preview

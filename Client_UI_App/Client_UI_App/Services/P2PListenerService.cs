@@ -78,6 +78,8 @@ namespace Client_UI_App.Services
         public static event Action<string, string, string, int, int>?      GroupVideoReplied;
         // Group video leave:   (groupId, username)
         public static event Action<string, string>?                        GroupVideoLeft;
+        // Group video screen-share state: (groupId, username, isPresenting)
+        public static event Action<string, string, bool>?                  GroupVideoPresent;
 
         // ── Inject một message đến từ relay server (thay thế kết nối P2P trực tiếp) ──
         // senderIp: public IP của người gửi (dùng cho audio/video UDP endpoint)
@@ -234,6 +236,12 @@ namespace Client_UI_App.Services
             {
                 string[] p = line.Split('|', 3);
                 if (p.Length == 3) GroupVideoLeft?.Invoke(p[1], p[2]);
+            }
+            else if (line.StartsWith("GROUP_VIDEO_PRESENT|"))
+            {
+                // GROUP_VIDEO_PRESENT|groupId|username|0|1
+                string[] p = line.Split('|', 4);
+                if (p.Length == 4) GroupVideoPresent?.Invoke(p[1], p[2], p[3] == "1");
             }
             else if (line.StartsWith("TYPING|"))
             {
@@ -576,6 +584,13 @@ namespace Client_UI_App.Services
                     string[] parts = firstLine.Split('|', 3);
                     if (parts.Length == 3)
                         GroupVideoLeft?.Invoke(parts[1], parts[2]);
+                }
+                else if (firstLine.StartsWith("GROUP_VIDEO_PRESENT|"))
+                {
+                    // GROUP_VIDEO_PRESENT|groupId|username|0|1
+                    string[] parts = firstLine.Split('|', 4);
+                    if (parts.Length == 4)
+                        GroupVideoPresent?.Invoke(parts[1], parts[2], parts[3] == "1");
                 }
             }
             catch { /* Bỏ qua lỗi đọc */ }
