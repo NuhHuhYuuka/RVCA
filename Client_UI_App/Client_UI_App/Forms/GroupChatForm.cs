@@ -24,6 +24,8 @@ namespace Client_UI_App.Forms
         private readonly HashSet<string> _voiceMembers = new();
         // JOIN info từ peer trước khi mình vào voice — dùng khi mình join sau
         private readonly Dictionary<string, (string ip, int udpPort, int tcpPort)> _pendingVoiceJoins = new();
+        // REPLY info từ peer khi mình không trong voice — buffer để xử lý lần join tiếp
+        private readonly Dictionary<string, (string ip, int udpPort)> _pendingVoiceReplies = new();
 
         // ── Voice channel form ────────────────────────────────────────
         private GroupVoiceForm?      _voiceForm;
@@ -35,6 +37,8 @@ namespace Client_UI_App.Forms
         private readonly HashSet<string> _videoMembers = new();
         // JOIN info từ peer trước khi mình vào video — dùng khi mình join sau
         private readonly Dictionary<string, (string ip, int audioPort, int videoPort, int tcpPort)> _pendingVideoJoins = new();
+        // REPLY info từ peer khi mình không trong video — buffer để xử lý lần join tiếp
+        private readonly Dictionary<string, (string ip, int audioPort, int videoPort)> _pendingVideoReplies = new();
 
         public GroupChatForm(string myUsername, string groupId, string groupName, string creator = "")
         {
@@ -463,6 +467,18 @@ namespace Client_UI_App.Forms
                 }
                 _pendingVoiceJoins.Clear();
 
+                // Kết nối với các peer đã reply khi mình chưa trong voice (join/leave trước đó)
+                foreach (var (peerName, (peerIp, peerUdp)) in _pendingVoiceReplies)
+                {
+                    if (!_voiceService.HasPeer(peerName))
+                    {
+                        _voiceService.AddPeer(peerName, peerIp, peerUdp);
+                        _voiceForm?.AddMember(peerName);
+                        AppendChat($"[Voice] ↺ Cached reply {peerName} → {peerIp}:{peerUdp}", Color.FromArgb(0, 180, 130));
+                    }
+                }
+                _pendingVoiceReplies.Clear();
+
                 var endpoints = await ResolveOnlineMembersAsync();
                 AppendChat($"[Voice] Broadcast JOIN → {endpoints.Count} thành viên: {string.Join(", ", endpoints.Select(e => e.name))}", Color.FromArgb(100, 100, 140));
                 if (endpoints.Count > 0)
@@ -472,11 +488,17 @@ namespace Client_UI_App.Forms
 
                 SetStatus($"🎙️ Voice  ({_voiceMembers.Count} người)", Color.FromArgb(0, 200, 150));
 
-                // Retry sau 3s — phòng relay chậm hoặc peer chưa join kịp lần đầu
+                // Retry sau 3s và 6s — phòng relay chậm hoặc peer chưa join kịp
                 var capSvc = _voiceService;
                 _ = Task.Run(async () =>
                 {
                     await Task.Delay(3000);
+                    if (IsDisposed) return;
+                    BeginInvoke(() => _ = RetryVoiceAnnounceAsync(capSvc, myUdp));
+                });
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(6000);
                     if (IsDisposed) return;
                     BeginInvoke(() => _ = RetryVoiceAnnounceAsync(capSvc, myUdp));
                 });
@@ -503,6 +525,7 @@ namespace Client_UI_App.Forms
                 _voiceService = null;
                 _voiceMembers.Clear();
                 _pendingVoiceJoins.Clear();
+                _pendingVoiceReplies.Clear();
                 UpdateVoiceButton();
                 AppendChat("[Voice] Bạn đã rời voice channel", Color.FromArgb(200, 100, 100));
 
@@ -562,7 +585,10 @@ namespace Client_UI_App.Forms
             AppendChat($"[Voice] {peerName} reply → {peerIp}:{peerUdpPort}", Color.FromArgb(0, 200, 150));
             _voiceForm?.AddMember(peerName);
 
-            _voiceService?.AddPeer(peerName, peerIp, peerUdpPort);
+            if (_voiceService != null)
+                _voiceService.AddPeer(peerName, peerIp, peerUdpPort);
+            else
+                _pendingVoiceReplies[peerName] = (peerIp, peerUdpPort);
         }
 
         // Nhận GROUP_VOICE_LEAVE — peer rời channel
@@ -713,6 +739,18 @@ namespace Client_UI_App.Forms
                 }
                 _pendingVideoJoins.Clear();
 
+                // Kết nối với các peer đã reply khi mình chưa trong video
+                foreach (var (peerName, (peerIp, peerAudio, peerVideo)) in _pendingVideoReplies)
+                {
+                    if (!_videoService.HasPeer(peerName))
+                    {
+                        _videoService.AddPeer(peerName, peerIp, peerAudio, peerVideo);
+                        _videoForm?.AddPeerTile(peerName);
+                        AppendChat($"[Video] ↺ Cached reply {peerName} → {peerIp} audio:{peerAudio} video:{peerVideo}", Color.FromArgb(80, 150, 230));
+                    }
+                }
+                _pendingVideoReplies.Clear();
+
                 var endpoints = await ResolveOnlineMembersAsync();
                 AppendChat($"[Video] Broadcast JOIN tới {endpoints.Count} endpoint: {string.Join(", ", endpoints.Select(e => e.name))}", Color.FromArgb(100, 100, 140));
                 if (endpoints.Count > 0)
@@ -723,13 +761,19 @@ namespace Client_UI_App.Forms
 
                 SetStatus($"📹 Video  ({_videoMembers.Count} người)", Color.FromArgb(80, 150, 230));
 
-                // Retry sau 3s — phòng relay chậm hoặc peer chưa join kịp lần đầu
+                // Retry sau 3s và 6s — phòng relay chậm hoặc peer chưa join kịp
                 var capSvcV   = _videoService;
                 int myAudio   = _videoService.LocalAudioPort;
                 int myVideo   = _videoService.LocalVideoPort;
                 _ = Task.Run(async () =>
                 {
                     await Task.Delay(3000);
+                    if (IsDisposed) return;
+                    BeginInvoke(() => _ = RetryVideoAnnounceAsync(capSvcV, myAudio, myVideo));
+                });
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(6000);
                     if (IsDisposed) return;
                     BeginInvoke(() => _ = RetryVideoAnnounceAsync(capSvcV, myAudio, myVideo));
                 });
@@ -758,6 +802,7 @@ namespace Client_UI_App.Forms
                 _videoService?.Stop(); _videoService = null;
                 _videoMembers.Clear();
                 _pendingVideoJoins.Clear();
+                _pendingVideoReplies.Clear();
                 UpdateVideoButton();
                 AppendChat("[Video] Bạn đã rời video channel", Color.FromArgb(200, 100, 100));
 
@@ -833,7 +878,11 @@ namespace Client_UI_App.Forms
             UpdateVideoButton();
             AppendChat($"[Video] {peerName} reply → {peerIp} audio:{peerAudio} video:{peerVideo}", Color.FromArgb(80, 150, 230));
             _videoForm?.AddPeerTile(peerName);
-            _videoService?.AddPeer(peerName, peerIp, peerAudio, peerVideo);
+
+            if (_videoService != null)
+                _videoService.AddPeer(peerName, peerIp, peerAudio, peerVideo);
+            else
+                _pendingVideoReplies[peerName] = (peerIp, peerAudio, peerVideo);
         }
 
         // Peer rời video channel
