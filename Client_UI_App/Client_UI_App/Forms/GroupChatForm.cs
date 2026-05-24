@@ -464,12 +464,22 @@ namespace Client_UI_App.Forms
                 _pendingVoiceJoins.Clear();
 
                 var endpoints = await ResolveOnlineMembersAsync();
+                AppendChat($"[Voice] Broadcast JOIN → {endpoints.Count} thành viên: {string.Join(", ", endpoints.Select(e => e.name))}", Color.FromArgb(100, 100, 140));
                 if (endpoints.Count > 0)
                     await GroupChatService.BroadcastVoiceJoinAsync(
                         _groupId, _myUsername, myUdp,
                         P2PListenerService.ListeningPort, endpoints);
 
                 SetStatus($"🎙️ Voice  ({_voiceMembers.Count} người)", Color.FromArgb(0, 200, 150));
+
+                // Retry sau 3s — phòng relay chậm hoặc peer chưa join kịp lần đầu
+                var capSvc = _voiceService;
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(3000);
+                    if (IsDisposed) return;
+                    BeginInvoke(() => _ = RetryVoiceAnnounceAsync(capSvc, myUdp));
+                });
             }
             catch (Exception ex)
             {
@@ -574,6 +584,61 @@ namespace Client_UI_App.Forms
                 SetStatus($"🎙️ Voice  ({_voiceMembers.Count} người)", Color.FromArgb(0, 200, 150));
         }
 
+        // Retry broadcast JOIN sau delay — xử lý trường hợp relay chậm hoặc peer chưa ready
+        private async Task RetryVoiceAnnounceAsync(GroupVoiceService capSvc, int myUdp)
+        {
+            if (_voiceService != capSvc || _voiceService == null) return;
+
+            // Xử lý pending joins mới (peer join trễ gửi JOIN sau lần đầu chúng ta broadcast)
+            var pending = new Dictionary<string, (string ip, int udpPort, int tcpPort)>(_pendingVoiceJoins);
+            _pendingVoiceJoins.Clear();
+            foreach (var (peerName, (peerIp, peerUdp, peerTcp)) in pending)
+            {
+                if (!_voiceService.HasPeer(peerName))
+                {
+                    _voiceService.AddPeer(peerName, peerIp, peerUdp);
+                    _voiceForm?.AddMember(peerName);
+                    AppendChat($"[Voice] ↺ Kết nối {peerName} → {peerIp}:{peerUdp}", Color.FromArgb(0, 180, 130));
+                    _ = GroupChatService.SendVoiceReplyAsync(
+                        peerIp, peerTcp, _groupId, _myUsername, myUdp, _myUsername, peerName);
+                }
+            }
+
+            // Re-broadcast JOIN lần 2 — đảm bảo peer nhận được dù relay lần đầu thất bại
+            var refreshed = await ResolveOnlineMembersAsync();
+            if (_voiceService != capSvc || refreshed.Count == 0) return;
+            AppendChat($"[Voice] ↺ Re-broadcast JOIN → {refreshed.Count} thành viên", Color.FromArgb(80, 80, 120));
+            await GroupChatService.BroadcastVoiceJoinAsync(
+                _groupId, _myUsername, myUdp, P2PListenerService.ListeningPort, refreshed);
+        }
+
+        private async Task RetryVideoAnnounceAsync(GroupVideoService capSvc, int myAudio, int myVideo)
+        {
+            if (_videoService != capSvc || _videoService == null) return;
+
+            var pending = new Dictionary<string, (string ip, int audioPort, int videoPort, int tcpPort)>(_pendingVideoJoins);
+            _pendingVideoJoins.Clear();
+            foreach (var (peerName, (peerIp, peerAudio, peerVideo, peerTcp)) in pending)
+            {
+                if (!_videoService.HasPeer(peerName))
+                {
+                    _videoService.AddPeer(peerName, peerIp, peerAudio, peerVideo);
+                    _videoForm?.AddPeerTile(peerName);
+                    AppendChat($"[Video] ↺ Kết nối {peerName} → {peerIp} audio:{peerAudio} video:{peerVideo}", Color.FromArgb(80, 130, 200));
+                    _ = GroupChatService.SendVideoReplyAsync(
+                        peerIp, peerTcp, _groupId, _myUsername,
+                        myAudio, myVideo, _myUsername, peerName);
+                }
+            }
+
+            var refreshed = await ResolveOnlineMembersAsync();
+            if (_videoService != capSvc || refreshed.Count == 0) return;
+            AppendChat($"[Video] ↺ Re-broadcast JOIN → {refreshed.Count} thành viên", Color.FromArgb(80, 80, 120));
+            await GroupChatService.BroadcastVideoJoinAsync(
+                _groupId, _myUsername, myAudio, myVideo,
+                P2PListenerService.ListeningPort, refreshed);
+        }
+
         private void ShowVoiceForm()
         {
             if (_voiceService == null) return;
@@ -657,6 +722,17 @@ namespace Client_UI_App.Forms
                         P2PListenerService.ListeningPort, endpoints);
 
                 SetStatus($"📹 Video  ({_videoMembers.Count} người)", Color.FromArgb(80, 150, 230));
+
+                // Retry sau 3s — phòng relay chậm hoặc peer chưa join kịp lần đầu
+                var capSvcV   = _videoService;
+                int myAudio   = _videoService.LocalAudioPort;
+                int myVideo   = _videoService.LocalVideoPort;
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(3000);
+                    if (IsDisposed) return;
+                    BeginInvoke(() => _ = RetryVideoAnnounceAsync(capSvcV, myAudio, myVideo));
+                });
             }
             catch (Exception ex)
             {
