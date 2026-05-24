@@ -1144,12 +1144,50 @@ static async Task ProcessVoiceTurnAsync(
             Console.ResetColor();
         }
 
-        // TTS sau khi stream hoàn tất (cần toàn bộ JP text)
+        // TTS sau khi stream hoàn tất (cần toàn bộ JP text).
+        // Fallback: AI đôi khi quên <JP> tag → dịch nhanh VN sang JP để có audio.
+        if (string.IsNullOrWhiteSpace(jpText) && !string.IsNullOrWhiteSpace(vnText))
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"[TTS] JP rỗng — fallback dịch VN sang JP cho VoiceVox");
+            Console.ResetColor();
+            jpText = await TranslateVnToJpAsync(vnText);
+        }
+
         if (!string.IsNullOrWhiteSpace(jpText))
         {
-            byte[] wavBytes = await GetVoiceVoxAudioAsync(jpText);
-            if (wavBytes.Length > 0)
-                await SendWavAsOpusUdpAsync(wavBytes, udpSend, clientEp, encoder);
+            try
+            {
+                Console.ForegroundColor = ConsoleColor.DarkCyan;
+                Console.WriteLine($"[TTS] VoiceVox query: {(jpText.Length > 60 ? jpText[..60] + "..." : jpText)}");
+                Console.ResetColor();
+                byte[] wavBytes = await GetVoiceVoxAudioAsync(jpText);
+                if (wavBytes.Length > 0)
+                {
+                    Console.ForegroundColor = ConsoleColor.DarkCyan;
+                    Console.WriteLine($"[TTS] WAV {wavBytes.Length} bytes → encoding Opus → UDP {clientEp}");
+                    Console.ResetColor();
+                    await SendWavAsOpusUdpAsync(wavBytes, udpSend, clientEp, encoder);
+                }
+                else
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"[TTS] VoiceVox trả về 0 bytes");
+                    Console.ResetColor();
+                }
+            }
+            catch (Exception ttsEx)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"[TTS ERROR] {ttsEx.Message} — kiểm tra VoiceVox engine ở http://127.0.0.1:50021");
+                Console.ResetColor();
+            }
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"[TTS] Bỏ qua — không có JP text để phát");
+            Console.ResetColor();
         }
     }
     catch (Exception ex)
@@ -1157,6 +1195,28 @@ static async Task ProcessVoiceTurnAsync(
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine($"[VOICE PROCESS ERROR] {ex.Message}");
         Console.ResetColor();
+    }
+}
+
+// Fallback nhanh khi AI quên <JP> tag — dịch VN sang JP đơn giản qua OpenRouter
+static async Task<string> TranslateVnToJpAsync(string vnText)
+{
+    try
+    {
+        string prompt =
+            $"Translate this Vietnamese sentence to natural spoken Japanese (hiragana/katakana/kanji, no romaji). " +
+            $"Output ONLY the Japanese translation, no explanations, no tags.\n\nVietnamese: {vnText}";
+        string raw = await AskOpenRouterAsync(prompt);
+        // Loại bỏ tag nếu có lỡ
+        raw = Regex.Replace(raw, @"<[^>]+>", "").Trim();
+        return raw;
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"[TRANSLATE ERROR] {ex.Message}");
+        Console.ResetColor();
+        return "";
     }
 }
 
