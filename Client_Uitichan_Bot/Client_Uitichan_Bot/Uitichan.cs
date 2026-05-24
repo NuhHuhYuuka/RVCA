@@ -331,7 +331,9 @@ static async Task HandleBotVoiceOfferRelayAsync(string srvIp, string fromUser, s
     using var udpRecv  = new UdpClient(0);
     int    botUdpPort  = ((IPEndPoint)udpRecv.Client.LocalEndPoint!).Port;
     using var udpSend  = new UdpClient();
-    string botLanIp    = GetLocalLanIp();
+    // Dùng IP facing server (Tailscale nếu server trên Tailscale) thay vì LAN IP,
+    // để client peer reach được bot UDP qua đúng đường.
+    string botLanIp    = GetIpFacingServer(srvIp);
     var    clientEp    = new IPEndPoint(IPAddress.Parse(clientIp), clientUdpPort);
 
     // Gửi VOICE_ACCEPT|botLanIp|botUdpPort qua relay về cả 2 Directory Server
@@ -1442,6 +1444,30 @@ static async Task<string> SendDirectoryCommandAsync(int dirPort, string command)
 // ══════════════════════════════════════════════════════════════════════
 static async Task<string> DetectBotIpAsync()
 {
+    // Lớp 0: UDP-trick tới SERVER_IP — lấy IP của adapter nhìn thấy server.
+    // Quan trọng cho Tailscale/VPN: client peer dùng IP này để gửi UDP tới bot,
+    // nên phải là IP routable từ phía peer (= cùng đường tới server).
+    string srvIp = Environment.GetEnvironmentVariable("SERVER_IP") ?? "127.0.0.1";
+    if (!string.IsNullOrWhiteSpace(srvIp) && srvIp != "127.0.0.1")
+    {
+        try
+        {
+            using var socket = new System.Net.Sockets.Socket(
+                System.Net.Sockets.AddressFamily.InterNetwork,
+                System.Net.Sockets.SocketType.Dgram, 0);
+            socket.Connect(srvIp, 65530);
+            string ip = ((IPEndPoint)socket.LocalEndPoint!).Address.ToString();
+            if (!ip.StartsWith("127.") && ip != "::1")
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"[IP] IP facing server ({srvIp}): {ip}");
+                Console.ResetColor();
+                return ip;
+            }
+        }
+        catch { /* server unreachable — fall through */ }
+    }
+
     // Lớp 1: Azure IMDS (chỉ hoạt động trên Azure VM, timeout 1s)
     try
     {
@@ -1485,6 +1511,26 @@ static async Task<string> DetectBotIpAsync()
     Console.WriteLine($"[IP] Dùng LAN IP (không có internet hoặc dev local): {lanIp}");
     Console.ResetColor();
     return lanIp;
+}
+
+// Lấy IP của adapter dùng để reach server (Tailscale nếu server trên Tailscale).
+// Dùng cho VOICE_ACCEPT để client peer biết gửi UDP về đâu.
+static string GetIpFacingServer(string srvIp)
+{
+    if (!string.IsNullOrWhiteSpace(srvIp) && srvIp != "127.0.0.1")
+    {
+        try
+        {
+            using var socket = new System.Net.Sockets.Socket(
+                System.Net.Sockets.AddressFamily.InterNetwork,
+                System.Net.Sockets.SocketType.Dgram, 0);
+            socket.Connect(srvIp, 65530);
+            string ip = ((IPEndPoint)socket.LocalEndPoint!).Address.ToString();
+            if (!ip.StartsWith("127.") && ip != "::1") return ip;
+        }
+        catch { }
+    }
+    return GetLocalLanIp();
 }
 
 static string GetLocalLanIp()
