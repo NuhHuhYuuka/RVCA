@@ -145,7 +145,23 @@ namespace Client_UI_App.Services
             string key = $"{ip}:{udpPort}";
             lock (_peersLock)
             {
-                if (_peers.ContainsKey(key)) return;
+                // Endpoint đã có sẵn — update username nếu cần
+                if (_peers.TryGetValue(key, out var existingByEndpoint))
+                {
+                    existingByEndpoint.Username = username;
+                    existingByEndpoint.SendEp   = new IPEndPoint(IPAddress.Parse(ip), udpPort);
+                    return;
+                }
+
+                // Username đã có nhưng với endpoint cũ (peer rejoin với port mới) — UPDATE thay vì add mới
+                var existing = _peers.FirstOrDefault(p => p.Value.Username == username);
+                if (existing.Value != null)
+                {
+                    _peers.Remove(existing.Key);
+                    existing.Value.SendEp = new IPEndPoint(IPAddress.Parse(ip), udpPort);
+                    _peers[key] = existing.Value;
+                    return;
+                }
 
                 var fmt    = new WaveFormat(SampleRate, 16, Channels);
                 var buffer = new BufferedWaveProvider(fmt)

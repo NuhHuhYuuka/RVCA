@@ -159,7 +159,21 @@ namespace Client_UI_App.Services
 
             lock (_lock)
             {
-                if (_peers.ContainsKey(username)) return;
+                // Peer đã có (rejoin với port mới) — UPDATE endpoint thay vì bỏ qua
+                if (_peers.TryGetValue(username, out var existing))
+                {
+                    _audioKey.Remove(existing.AudioRecvKey);
+                    _videoKey.Remove(existing.VideoRecvKey);
+
+                    existing.AudioRecvKey = ak;
+                    existing.VideoRecvKey = vk;
+                    existing.AudioSendEp  = new IPEndPoint(IPAddress.Parse(ip), theirAudioPort);
+                    existing.VideoSendEp  = new IPEndPoint(IPAddress.Parse(ip), theirVideoPort);
+
+                    _audioKey[ak] = username;
+                    _videoKey[vk] = username;
+                    return;
+                }
 
                 var fmt    = new WaveFormat(SampleRate, 16, Channels);
                 var buffer = new BufferedWaveProvider(fmt)

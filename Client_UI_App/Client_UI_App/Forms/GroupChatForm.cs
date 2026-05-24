@@ -723,6 +723,8 @@ namespace Client_UI_App.Forms
                 AppendChat($"[Video] Bạn đã tham gia video channel (audio:{_videoService.LocalAudioPort} video:{_videoService.LocalVideoPort}, IP:{myVideoIp})", Color.FromArgb(80, 150, 230));
                 if (!_videoService.HasAudio)
                     AppendChat("[Video] ⚠️ Không khởi được thiết bị audio — chỉ video (không mic/loa)", Color.OrangeRed);
+                if (_videoCapture == null)
+                    AppendChat("[Video] ⚠️ Không mở được camera — vẫn tham gia channel nhưng không gửi hình của bạn (có thể camera đang bị app khác chiếm)", Color.OrangeRed);
 
                 ShowVideoForm();
 
