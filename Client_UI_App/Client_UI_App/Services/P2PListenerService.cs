@@ -91,25 +91,74 @@ namespace Client_UI_App.Services
         private static bool IsUsableLanIp(string? ip) =>
             !string.IsNullOrWhiteSpace(ip) && ip != "127.0.0.1" && ip != "::1" && !ip.StartsWith("127.");
 
+        private static bool IsPrivateIp(string ip)
+        {
+            if (!IPAddress.TryParse(ip, out var address) || address.AddressFamily != AddressFamily.InterNetwork)
+                return false;
+            byte[] b = address.GetAddressBytes();
+            return (b[0] == 10)
+                || (b[0] == 172 && b[1] >= 16 && b[1] <= 31)
+                || (b[0] == 192 && b[1] == 168)
+                || (b[0] == 100 && b[1] >= 64 && b[1] <= 127);
+        }
+
+        private static bool SamePrivateNetwork(string ipA, string ipB)
+        {
+            if (!IPAddress.TryParse(ipA, out var a) || !IPAddress.TryParse(ipB, out var b)
+                || a.AddressFamily != AddressFamily.InterNetwork || b.AddressFamily != AddressFamily.InterNetwork)
+                return false;
+
+            byte[] aa = a.GetAddressBytes();
+            byte[] bb = b.GetAddressBytes();
+
+            if (aa[0] == 10 && bb[0] == 10)
+                return aa[1] == bb[1]; // 10.x.x.x → same /16
+
+            if (aa[0] == 172 && bb[0] == 172 && aa[1] >= 16 && aa[1] <= 31 && bb[1] == aa[1])
+                return aa[2] == bb[2]; // 172.16-31.x.x → same /24
+
+            if (aa[0] == 192 && bb[0] == 192 && aa[1] == 168)
+                return aa[2] == bb[2]; // 192.168.x.x → same /24
+
+            return false;
+        }
+
+        private static bool SameSubnet(string ipA, string ipB)
+        {
+            if (!IPAddress.TryParse(ipA, out var a) || !IPAddress.TryParse(ipB, out var b)
+                || a.AddressFamily != AddressFamily.InterNetwork || b.AddressFamily != AddressFamily.InterNetwork)
+                return false;
+
+            string[] pa = ipA.Split('.');
+            string[] pb = ipB.Split('.');
+            return pa.Length == 4 && pb.Length == 4
+                && pa[0] == pb[0] && pa[1] == pb[1] && pa[2] == pb[2];
+        }
+
         // Chọn IP tốt nhất để gửi UDP đến peer qua relay.
-        // - Nếu embeddedIp cùng /24 subnet với máy mình → dùng nó (cùng LAN, direct).
-        // - Nếu khác subnet → dùng senderIp (Tailscale/VPN IP từ relay server, routable).
-        // Điều này xử lý cả 2 trường hợp: cùng LAN + server WAN, khác mạng + Tailscale.
+        // - Nếu embeddedIp hợp lệ và nằm trong cùng mạng riêng tư thì ưu tiên dùng nó.
+        // - Nếu không thì dùng senderIp (địa chỉ thực tế của kết nối relay/Tailscale).
         private static string ChooseIpForRelay(string? embeddedIp, string senderIp)
         {
-            if (!IsUsableLanIp(embeddedIp))
-                return IsUsableLanIp(senderIp) ? senderIp : "127.0.0.1";
-
-            if (IsUsableLanIp(_myLanIp))
+            if (IsUsableLanIp(embeddedIp))
             {
-                string[] my  = _myLanIp.Split('.');
-                string[] emb = embeddedIp!.Split('.');
-                bool sameSubnet = my.Length == 4 && emb.Length == 4
-                    && my[0] == emb[0] && my[1] == emb[1] && my[2] == emb[2];
-                if (sameSubnet) return embeddedIp!;
+                string embedded = embeddedIp!;
+                if (!IsUsableLanIp(senderIp))
+                    return embedded;
+
+                if (embedded == senderIp)
+                    return embedded;
+
+                if (IsUsableLanIp(_myLanIp) && (SameSubnet(_myLanIp, embedded) || SamePrivateNetwork(_myLanIp, embedded)))
+                    return embedded;
+
+                if (SamePrivateNetwork(embedded, senderIp))
+                    return embedded;
+
+                return IsUsableLanIp(senderIp) ? senderIp : embedded;
             }
 
-            return IsUsableLanIp(senderIp) ? senderIp : embeddedIp!;
+            return IsUsableLanIp(senderIp) ? senderIp : "127.0.0.1";
         }
 
         private static void ProcessRelayedLine(string senderIp, string line)
