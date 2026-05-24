@@ -184,7 +184,10 @@ namespace Client_UI_App.Services
             using StreamReader  reader = new(stream, Encoding.UTF8, leaveOpen: true);
             await using StreamWriter writer = new(stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
 
-            string localIp = GetLocalLanIp();
+            // Đăng ký IP nhìn thấy server (Tailscale IP nếu dùng VPN) thay vì LAN IP.
+            // Lý do: peer khác sẽ dùng IP này để direct TCP — nếu là LAN IP thì peer khác mạng
+            // không reach được, phải fallback relay (chậm + có race condition).
+            string localIp = GetIpFacingServer();
             await writer.WriteLineAsync($"LOGIN|{username}|{password}|{localIp}:{myListeningPort}");
 
             string response = await reader.ReadLineAsync() ?? string.Empty;
